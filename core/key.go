@@ -1,5 +1,13 @@
 package core
 
+const (
+	StateActive   = "ACTIVE"
+	StateDisabled = "DISABLED"
+	StateDeleted  = "DELETED"
+)
+
+type KeyState string
+
 type Key string
 
 func (k Key) String() string {

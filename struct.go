@@ -16,9 +16,11 @@ var (
 )
 
 var (
-	ErrUnsupportedType         = errors.New("unsupported type, must be a struct pointer")
-	ErrSubjectIDNotfound       = errors.New("subjectID not found")
-	ErrSubjectIDManyDefinition = errors.New("subjectID defined multiple time")
+	ErrUnsupportedType = errors.New("unsupported type, must be a struct pointer")
+
+	ErrInvalidTagConfiguration = errors.New("invalid tag configuration")
+	errSubjectIDNotfound       = errors.New("subjectID not found")
+	errSubjectIDManyDefinition = errors.New("subjectID defined multiple time")
 )
 
 type piiStruct struct {
@@ -105,8 +107,14 @@ func parseTag(tagStr, name string, opts []string) (ok bool, optVals []string) {
 	return
 }
 
-func scan(values ...interface{}) (piiMap, error) {
-	indexes := make(map[int]*piiStruct)
+func scan(values ...interface{}) (indexes piiMap, err error) {
+	indexes = make(map[int]*piiStruct)
+
+	defer func() {
+		if err != nil && !errors.Is(ErrUnsupportedType, err) {
+			err = fmt.Errorf("%w: %v", ErrInvalidTagConfiguration, err)
+		}
+	}()
 
 	for idx, v := range values {
 		v := v
@@ -132,7 +140,7 @@ func scan(values ...interface{}) (piiMap, error) {
 					if ok, opts := parseTag(tags, tagSubjectID, tagOptsSubjectID); ok {
 						if vidx, ok := indexes[idx]; ok {
 							if vidx.subID != "" {
-								return nil, fmt.Errorf("%w: at pos #%d", ErrSubjectIDManyDefinition, idx)
+								return nil, fmt.Errorf("%w: at #%d", errSubjectIDManyDefinition, idx)
 							} else {
 								vidx.subID = input
 							}
@@ -158,9 +166,14 @@ func scan(values ...interface{}) (piiMap, error) {
 			}
 		}
 
+		// case of current values does not have pii tag configured
+		if _, ok := indexes[idx]; !ok {
+			continue
+		}
+
 		// return an error if a struct does not have subject id
 		if indexes[idx].subID == "" {
-			return nil, fmt.Errorf("%w: at pos #%d", ErrSubjectIDNotfound, idx)
+			return nil, fmt.Errorf("%w: at #%d", errSubjectIDNotfound, idx)
 		}
 
 		// ignore struct if it does not have personal fields

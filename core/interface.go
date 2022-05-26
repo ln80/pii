@@ -10,20 +10,31 @@ var (
 )
 
 var (
-	ErrPersistKeyConflict = errors.New("conflict error while persisting key(s)")
-	ErrPeristKeyFailed    = errors.New("failed to persist key(s)")
+	ErrPersistKeyConflict  = errors.New("conflict error while persisting key(s)")
+	ErrPeristKeyFailed     = errors.New("failed to persist key(s)")
+	ErrRenableKeyFailed    = errors.New("failed to renable key(s)")
+	ErrKeyIDNotFound       = errors.New("key ID not found")
+	ErrDisableKeyFailed    = errors.New("failed to disable key")
+	ErrHardDeleteKeyFailed = errors.New("failed to hard delete key")
 )
 
-type KeyGen func(ctx context.Context, namespace, subID string) (string, error)
+var (
+	ErrEnryptionFailed  = errors.New("failed to encrypt message")
+	ErrDecryptionFailed = errors.New("failed to decrypt message")
+)
+
+type KeyGen func(ctx context.Context, namespace, keyID string) (string, error)
 
 type KeyEngine interface {
-	DisableKey(ctx context.Context, namespace, subID string) error
+	GetKeys(ctx context.Context, namespace string, keyIDs ...string) (keys KeyMap, err error)
 
-	DeleteKey(ctx context.Context, namespace, subID string) error
+	GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen KeyGen) (KeyMap, error)
 
-	GetKeys(ctx context.Context, namespace string, subIDs ...string) (keys KeyMap, err error)
+	DisableKey(ctx context.Context, namespace, keyID string) error
 
-	GetOrCreateKeys(ctx context.Context, namespace string, subIDs []string, keyGen KeyGen) (KeyMap, error)
+	RenableKey(ctx context.Context, namespace, keyID string) error
+
+	DeleteKey(ctx context.Context, namespace, keyID string) error
 }
 
 type KeyUpdaterEngine interface {
@@ -33,16 +44,16 @@ type KeyUpdaterEngine interface {
 
 type KeyRotatorEngine interface {
 	KeyEngine
-	RotateKeys(ctx context.Context, namespace, subIDs string) error
+	RotateKeys(ctx context.Context, namespace, keyIDs string) error
 }
 
 type KeyCacheEngine interface {
 	KeyEngine
-	Clear(ctx context.Context, namespace string, force bool) error
+	ClearCache(ctx context.Context, namespace string, force bool) error
 }
 
 type Encrypter interface {
-	Encrypt(key Key, txt string) (ctxt string, err error)
-	Decrypt(key Key, ctxt string) (txt string, err error)
+	Encrypt(key Key, plainTxt string) (cypherTxt string, err error)
+	Decrypt(key Key, cypherTxt string) (plainTxt string, err error)
 	GenNewKey() string
 }

@@ -11,23 +11,34 @@ import (
 	"github.com/ln80/pii/core"
 )
 
+const (
+	cacheTTLDefault = 20 * time.Second
+)
+
 type keyCache struct {
-	ID  string
-	Key core.Key
-	At  int64
+	ID    string
+	Key   core.Key
+	At    int64
+	State core.KeyState
 }
 
-// func (kc keyCache) String() string {
-// 	return fmt.Sprintf("{ID:%s,Key:****,At:%d}", kc.ID, kc.At)
-// }
+func newKeyCache(id string, key core.Key) keyCache {
+	return keyCache{
+		ID:    id,
+		Key:   key,
+		At:    time.Now().Unix(),
+		State: core.StateActive,
+	}
+}
 
 type engine struct {
-	store core.KeyEngine
+	origin core.KeyEngine
 
 	cache map[string]map[string]keyCache
 
-	mu  sync.RWMutex
-	ttl int64
+	mu sync.RWMutex
+
+	ttl time.Duration
 }
 
 var _ core.KeyEngine = &engine{}
@@ -39,104 +50,93 @@ func NewKeyEngine() core.KeyEngine {
 	}
 }
 
-func NewCacheWrapper(store core.KeyEngine, ttl int64) core.KeyEngine {
-	if store == nil {
-		panic("invalid embedded Key Engine store, nil value found")
+func NewCacheWrapper(origin core.KeyEngine, ttl time.Duration) core.KeyEngine {
+	if origin == nil {
+		panic("invalid origin Key Engine, nil value found")
 	}
 	if ttl == 0 {
-		ttl = 30 * 60 // default value: 30 mins
+		ttl = cacheTTLDefault
 	}
 
 	return &engine{
-		cache: make(map[string]map[string]keyCache),
-		store: store,
-		ttl:   ttl,
+		cache:  make(map[string]map[string]keyCache),
+		origin: origin,
+		ttl:    ttl,
 	}
 }
 
-func (e *engine) GetKeys(ctx context.Context, namespace string, subIDs ...string) (core.KeyMap, error) {
+func (e *engine) cacheOf(namespace string) map[string]keyCache {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if _, ok := e.cache[namespace]; !ok {
 		e.cache[namespace] = make(map[string]keyCache)
 	}
-	foundKeys := core.NewKeyMap()
 
+	return e.cache[namespace]
+}
+
+func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (core.KeyMap, error) {
+	cache := e.cacheOf(namespace)
+
+	foundKeys := core.NewKeyMap()
 	missedKeys := []string{}
-	for _, subID := range subIDs {
-		if key, ok := e.cache[namespace][subID]; ok {
-			foundKeys[subID] = key.Key
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	for _, keyID := range keyIDs {
+		if key, ok := cache[keyID]; ok {
+			if key.State != core.StateActive {
+				continue
+			}
+
+			foundKeys[keyID] = key.Key
 		} else {
-			if e.store != nil {
-				missedKeys = append(missedKeys, subID)
+			if e.origin != nil {
+				missedKeys = append(missedKeys, keyID)
 			}
 		}
 	}
 
-	if e.store != nil {
-		keys, err := e.store.GetKeys(ctx, namespace, missedKeys...)
+	if e.origin != nil {
+		keys, err := e.origin.GetKeys(ctx, namespace, missedKeys...)
 		if err != nil {
 			return nil, err
 		}
-		for subID, k := range keys {
-			foundKeys[subID] = k
-			e.cache[namespace][subID] = keyCache{
-				ID:  subID,
-				Key: k,
-				At:  time.Now().Unix(),
-			}
+		for keyID, k := range keys {
+			foundKeys[keyID] = k
+			cache[keyID] = newKeyCache(keyID, k)
 		}
 	}
 
 	return foundKeys, nil
 }
 
-func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, subIDs []string, keyGen core.KeyGen) (core.KeyMap, error) {
+func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen core.KeyGen) (core.KeyMap, error) {
 	if keyGen == nil {
 		keyGen = aes.Key256GenFn
 	}
 
-	e.mu.Lock()
-	if _, ok := e.cache[namespace]; !ok {
-		e.cache[namespace] = make(map[string]keyCache)
-	}
-	e.mu.Unlock()
+	cache := e.cacheOf(namespace)
 
-	if e.store != nil {
-		// keys, err := e.store.GetOrCreateKeys(ctx, namespace, subIDs, keyGen)
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// for subID, k := range keys {
-		// 	e.cache[namespace][subID] = keyCache{
-		// 		Key: k,
-		// 		At:  time.Now().Unix(),
-		// 	}
-		// }
-		// return keys, nil
-
+	if e.origin != nil {
 		return func() (core.KeyMap, error) {
 			e.mu.Lock()
 			defer e.mu.Unlock()
 
-			keys, err := e.store.GetOrCreateKeys(ctx, namespace, subIDs, keyGen)
+			keys, err := e.origin.GetOrCreateKeys(ctx, namespace, keyIDs, keyGen)
 			if err != nil {
 				return nil, err
 			}
-			for subID, k := range keys {
-				e.cache[namespace][subID] = keyCache{
-					ID:  subID,
-					Key: k,
-					At:  time.Now().Unix(),
-				}
+			for keyID, k := range keys {
+				cache[keyID] = newKeyCache(keyID, k)
 			}
 			return keys, nil
 		}()
 	}
-	// e.mu.Unlock()
 
-	keys, err := e.GetKeys(ctx, namespace, subIDs...)
+	keys, err := e.GetKeys(ctx, namespace, keyIDs...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,72 +144,128 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, subIDs [
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	for _, subID := range subIDs {
-		if _, ok := keys[subID]; !ok {
-			newKey, err := keyGen(ctx, namespace, subID)
+	for _, keyID := range keyIDs {
+		if _, ok := keys[keyID]; !ok {
+			// only add new entry if key is a fresh new one.
+			// it may be disabled/deleted and still have record
+			if _, ok := cache[keyID]; ok {
+				continue
+			}
+
+			newKey, err := keyGen(ctx, namespace, keyID)
 			if err != nil {
 				return nil, err
 			}
-			keys[subID] = core.Key(newKey)
+			keys[keyID] = core.Key(newKey)
 
-			e.cache[namespace][subID] = keyCache{
-				ID:  subID,
-				Key: core.Key(newKey),
-				At:  time.Now().Unix(),
-			}
+			cache[keyID] = newKeyCache(keyID, core.Key(newKey))
 		}
 	}
+
+	log.Printf("GetOrCreateKeys no origin result: %+v, %v\n", keys, err)
 
 	return keys, nil
 }
 
-func (e *engine) DeleteKey(ctx context.Context, namespace, subID string) error {
-	if e.store != nil {
-		if err := e.store.DeleteKey(ctx, namespace, subID); err != nil {
+func (e *engine) DisableKey(ctx context.Context, namespace, keyID string) error {
+	if e.origin != nil {
+		if err := e.origin.DisableKey(ctx, namespace, keyID); err != nil {
+			// side note no need to wrap error:
+			// origin is also an infra adapter & supposed to not propagate infra error
 			return err
 		}
 	}
+
+	cache := e.cacheOf(namespace)
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if _, ok := e.cache[namespace]; !ok {
-		return nil
+	keyCache, ok := cache[keyID]
+	if !ok {
+		return fmt.Errorf("%w: for %s: %v", core.ErrDisableKeyFailed, keyID, core.ErrKeyIDNotFound)
 	}
 
-	delete(e.cache[namespace], subID)
+	if keyCache.State == core.StateDeleted {
+		return fmt.Errorf("%w: for %s: key already hard deleted", core.ErrDisableKeyFailed, keyID)
+	}
+
+	keyCache.State = core.StateDisabled
+	cache[keyID] = keyCache
 
 	return nil
 }
 
-func (e *engine) DisableKey(ctx context.Context, namespace, subID string) error {
-	return fmt.Errorf("%w: in-memory engine does not support disable key", core.ErrUnsupportedKeyOperation)
-}
+func (e *engine) RenableKey(ctx context.Context, namespace, keyID string) error {
+	if e.origin != nil {
+		if err := e.origin.RenableKey(ctx, namespace, keyID); err != nil {
+			return err
+		}
+	}
 
-func (e *engine) Clear(ctx context.Context, namespace string, force bool) error {
-	log.Println("engine clear start")
+	cache := e.cacheOf(namespace)
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// log.Println("engine clear start", e.store)
-	// If store is empty then engine is acting as a store (not as a cache wrapper).
-	// Therfore, silently ignore clear operation.
-	if e.store == nil {
+	keyCache, ok := cache[keyID]
+	if !ok {
+		return fmt.Errorf("%w: for %s: %v", core.ErrRenableKeyFailed, keyID, core.ErrKeyIDNotFound)
+	}
+
+	if keyCache.State == core.StateDeleted {
+		return fmt.Errorf("%w: for %s: key already hard deleted", core.ErrDisableKeyFailed, keyID)
+	}
+
+	keyCache.State = core.StateActive
+	cache[keyID] = keyCache
+
+	return nil
+}
+
+func (e *engine) DeleteKey(ctx context.Context, namespace, keyID string) error {
+	if e.origin != nil {
+		if err := e.origin.DeleteKey(ctx, namespace, keyID); err != nil {
+			return err
+		}
+	}
+
+	cache := e.cacheOf(namespace)
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	keyCache, ok := cache[keyID]
+	if !ok {
 		return nil
 	}
 
-	log.Printf("%p %+v", e.cache, e.cache)
-	if _, ok := e.cache[namespace]; !ok {
+	keyCache.Key = ""
+	keyCache.State = core.StateDeleted
+	cache[keyID] = keyCache
+
+	return nil
+}
+
+func (e *engine) ClearCache(ctx context.Context, namespace string, force bool) error {
+	// If store is empty then engine is acting as a store aka basic key engine.
+	// Therfore silently ignore clear cache operation.
+	if e.origin == nil {
 		return nil
 	}
 
-	if force {
-		e.cache[namespace] = make(map[string]keyCache)
-	} else {
-		for subID, k := range e.cache[namespace] {
-			if expired := k.At+e.ttl < time.Now().Unix(); expired {
-				delete(e.cache[namespace], subID)
-			}
+	cache := e.cacheOf(namespace)
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if len(cache) == 0 {
+		return nil
+	}
+
+	for keyID, k := range cache {
+		if expired := k.At+int64(e.ttl.Seconds()) < time.Now().Unix(); expired || force {
+			delete(cache, keyID)
 		}
 	}
 
