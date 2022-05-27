@@ -19,7 +19,7 @@ const (
 	HashKey  = "_pk"
 	RangeKey = "_sk"
 
-	attrSubject    = "_sub"
+	attrKeyID      = "_sub"
 	attrKey        = "_ckey"
 	attrDisabledAt = "_di_at"
 	attrDeletedAt  = "_de_at"
@@ -30,12 +30,12 @@ type KeyItem struct {
 	HashKey    string `dynamodbav:"_pk"`
 	RangeKey   string `dynamodbav:"_sk"`
 	Namespace  string `dynamodbav:"_nspace"`
-	SubID      string `dynamodbav:"_sub"`
+	KeyID      string `dynamodbav:"_sub"`
 	Key        []byte `dynamodbav:"_ckey"`
 	State      string `dynamodbav:"_state"`
 	CreatedAt  int64  `dynamodbav:"_cr_at"`
-	DisabledAt int64  `dynamodbav:"_di_at,omitempty"`
-	DeletedAt  int64  `dynamodbav:"_de_at,omitempty"`
+	DisabledAt int64  `dynamodbav:"_di_at"`
+	DeletedAt  int64  `dynamodbav:"_de_at"`
 }
 
 type engine struct {
@@ -43,9 +43,9 @@ type engine struct {
 	table string
 }
 
-var _ core.KeyUpdaterEngine = &engine{}
+var _ core.KeyEngine = &engine{}
 
-func NewKeyEngine(svc ClientAPI, table string) core.KeyUpdaterEngine {
+func NewKeyEngine(svc ClientAPI, table string) core.KeyEngine {
 	eng := &engine{
 		svc:   svc,
 		table: table,
@@ -89,7 +89,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			HashKey:   nspace,
 			RangeKey:  idkey.ID(),
 			Namespace: nspace,
-			SubID:     idkey.ID(),
+			KeyID:     idkey.ID(),
 			Key:       []byte(idkey.Key()),
 			CreatedAt: time.Now().UTC().Unix(),
 			State:     core.StateActive,
@@ -123,6 +123,10 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			ExpressionAttributeValues: expr.Values(),
 		}); err != nil {
 			if IsConditionCheckFailure(err) {
+				// perform a second fake update with a specific condition
+				// to distinguish new fresh created keys from the deleted/disabled ones
+				// update must returns the new fresh key value
+				// condition must be cost effective
 				exist[idkey.ID()] = struct{}{}
 				continue
 			}
@@ -132,32 +136,6 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 	}
 
 	return exist, nil
-}
-
-// UpdateKeys implements core.KeyUpdaterEngine
-func (e *engine) UpdateKeys(ctx context.Context, namespace string, keys []core.IDKey) error {
-	for _, idkey := range keys {
-		expr, err := expression.
-			NewBuilder().
-			WithUpdate(
-				expression.
-					Set(expression.Name(attrKey), expression.Value(idkey.Key())),
-			).
-			WithCondition(
-				expression.NotEqual(expression.Name(attrState), expression.Value(core.StateDeleted)),
-			).Build()
-		if err != nil {
-			return err
-		}
-		if err := e.updateKeyItem(ctx, namespace, idkey.ID(), expr); err != nil {
-			if IsConditionCheckFailure(err) {
-				continue
-			}
-			return err
-		}
-	}
-
-	return nil
 }
 
 // DeleteKey implements core.KeyUpdaterEngine
@@ -261,7 +239,7 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string
 		WithFilter(
 			expression.And(
 				expression.Name(attrState).Equal(expression.Value(core.StateActive)),
-				expression.Name(attrSubject).In(ops[0], ops[1:count]...),
+				expression.Name(attrKeyID).In(ops[0], ops[1:count]...),
 			),
 		)
 	expr, err := b.Build()
@@ -285,14 +263,16 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string
 			return nil, err
 		}
 
-		err = attributevalue.UnmarshalListOfMaps(out.Items, &items)
-		if err != nil {
+		pageItems := []KeyItem{}
+		if err = attributevalue.UnmarshalListOfMaps(out.Items, &pageItems); err != nil {
 			return nil, err
 		}
 
-		for _, item := range items {
-			keys[item.SubID] = core.Key(item.Key)
-		}
+		items = append(items, pageItems...)
+	}
+
+	for _, item := range items {
+		keys[item.KeyID] = core.Key(string(item.Key))
 	}
 
 	return keys, nil
@@ -338,3 +318,29 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 
 	return keys, nil
 }
+
+// UpdateKeys implements core.KeyUpdaterEngine
+// func (e *engine) UpdateKeys(ctx context.Context, namespace string, keys []core.IDKey) error {
+// 	for _, idkey := range keys {
+// 		expr, err := expression.
+// 			NewBuilder().
+// 			WithUpdate(
+// 				expression.
+// 					Set(expression.Name(attrKey), expression.Value([]byte(idkey.Key()))),
+// 			).
+// 			WithCondition(
+// 				expression.NotEqual(expression.Name(attrState), expression.Value(core.StateDeleted)),
+// 			).Build()
+// 		if err != nil {
+// 			return err
+// 		}
+// 		if err := e.updateKeyItem(ctx, namespace, idkey.ID(), expr); err != nil {
+// 			if IsConditionCheckFailure(err) {
+// 				continue
+// 			}
+// 			return err
+// 		}
+// 	}
+
+// 	return nil
+// }
