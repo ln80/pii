@@ -37,18 +37,29 @@ type KeyEngine interface {
 	DeleteKey(ctx context.Context, namespace, keyID string) error
 }
 
-type KeyUpdaterEngine interface {
+// type KeyUpdaterEngine interface {
+// 	KeyEngine
+// 	UpdateKeys(ctx context.Context, namespace string, keys []IDKey) error
+// }
+
+// type KeyRotatorEngine interface {
+// 	KeyEngine
+// 	RotateKeys(ctx context.Context, namespace, keyIDs string) error
+// 	Origin() KeyEngine
+// }
+
+// type KeyCacheEngine interface {
+// 	KeyEngine
+// 	ClearCache(ctx context.Context, namespace string, force bool) error
+// }
+
+type KeyEngineWrapper interface {
 	KeyEngine
-	UpdateKeys(ctx context.Context, namespace string, keys []IDKey) error
+	Origin() KeyEngine
 }
 
-type KeyRotatorEngine interface {
-	KeyEngine
-	RotateKeys(ctx context.Context, namespace, keyIDs string) error
-}
-
-type KeyCacheEngine interface {
-	KeyEngine
+type KeyEngineCache interface {
+	KeyEngineWrapper
 	ClearCache(ctx context.Context, namespace string, force bool) error
 }
 

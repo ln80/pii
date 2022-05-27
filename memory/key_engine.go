@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -42,7 +41,7 @@ type engine struct {
 }
 
 var _ core.KeyEngine = &engine{}
-var _ core.KeyCacheEngine = &engine{}
+var _ core.KeyEngineCache = &engine{}
 
 func NewKeyEngine() core.KeyEngine {
 	return &engine{
@@ -162,8 +161,6 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		}
 	}
 
-	log.Printf("GetOrCreateKeys no origin result: %+v, %v\n", keys, err)
-
 	return keys, nil
 }
 
@@ -270,4 +267,9 @@ func (e *engine) ClearCache(ctx context.Context, namespace string, force bool) e
 	}
 
 	return nil
+}
+
+// Origin implements core.KeyRotatorEngine
+func (e *engine) Origin() core.KeyEngine {
+	return e.origin
 }

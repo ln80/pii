@@ -11,11 +11,17 @@ import (
 func TestKeyEngine(t *testing.T) {
 	ctx := context.Background()
 
-	eng := NewKeyEngine()
+	t.Run("in-memory engine", func(t *testing.T) {
+		eng := NewKeyEngine()
 
-	testutil.KeyEngineTestSuite(t, ctx, eng)
+		testutil.KeyEngineTestSuite(t, ctx, eng)
+	})
 
-	eng = NewCacheWrapper(eng, 20*time.Minute)
+	t.Run("in-memory cache wrapper engine", func(t *testing.T) {
+		originEng := NewKeyEngine()
 
-	testutil.KeyEngineTestSuite(t, ctx, eng)
+		eng := NewCacheWrapper(originEng, 20*time.Minute)
+
+		testutil.KeyEngineTestSuite(t, ctx, eng)
+	})
 }
