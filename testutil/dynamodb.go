@@ -1,4 +1,4 @@
-package testdynamodb
+package testutil
 
 import (
 	"context"
@@ -17,29 +17,27 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-type AdminAPI interface {
-	dynamodb.DescribeTableAPIClient
-
-	CreateTable(ctx context.Context, params *dynamodb.CreateTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error)
-	DeleteTable(ctx context.Context, params *dynamodb.DeleteTableInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteTableOutput, error)
-	// UpdateTimeToLive(ctx context.Context, params *dynamodb.UpdateTimeToLiveInput, optFns ...func(*dynamodb.Options)) (*dynamodb.UpdateTimeToLiveOutput, error)
-}
+// Hash & Range keys must be equals to ones defined in dynamodb package and used for key storage
+const (
+	HashKey  string = "_pk"
+	RangeKey string = "_sk"
+)
 
 var (
 	dbsvc  *dynamodb.Client
 	dbonce sync.Once
+	rdm    = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
-func awsConfig(ctx context.Context) (cfg aws.Config, err error) {
-	cfg, err = config.LoadDefaultConfig(
-		context.Background(),
-		// config.WithRegion(""),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("TEST", "TEST", "TEST")),
-	)
-	return
+// type DynamoDBClient *dynamodb.Client
+
+func genTableName(prefix string) string {
+	now := strconv.FormatInt(time.Now().UnixNano(), 36)
+	random := strconv.FormatInt(int64(rdm.Int31()), 36)
+	return prefix + "-" + now + "-" + random
 }
 
-func WithTable(t *testing.T, tfn func(dbsvc *dynamodb.Client, table string)) {
+func WithDynamoDBTable(t *testing.T, tfn func(dbsvc interface{}, table string)) {
 	ctx := context.Background()
 
 	endpoint := os.Getenv("DYNAMODB_ENDPOINT")
@@ -48,11 +46,15 @@ func WithTable(t *testing.T, tfn func(dbsvc *dynamodb.Client, table string)) {
 	}
 
 	dbonce.Do(func() {
-		cfg, err := awsConfig(ctx)
+		cfg, err := config.LoadDefaultConfig(
+			ctx,
+			config.WithCredentialsProvider(
+				credentials.NewStaticCredentialsProvider("TEST", "TEST", "TEST"),
+			),
+		)
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		dbsvc = dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
 			o.EndpointResolver = dynamodb.EndpointResolverFromURL(endpoint)
 		})
@@ -64,6 +66,8 @@ func WithTable(t *testing.T, tfn func(dbsvc *dynamodb.Client, table string)) {
 		t.Fatalf("failed to create test table '%s': %v", table, err)
 	}
 
+	t.Log("dynamodb test table created:", table)
+
 	defer func() {
 		if err := deleteTable(ctx, dbsvc, table); err != nil {
 			t.Fatalf("failed to remove test table '%s': %v", table, err)
@@ -73,20 +77,7 @@ func WithTable(t *testing.T, tfn func(dbsvc *dynamodb.Client, table string)) {
 	tfn(dbsvc, table)
 }
 
-const (
-	HashKey  string = "_pk"
-	RangeKey string = "_sk"
-)
-
-var rdm = rand.New(rand.NewSource(time.Now().UnixNano()))
-
-func genTableName(prefix string) string {
-	now := strconv.FormatInt(time.Now().UnixNano(), 36)
-	random := strconv.FormatInt(int64(rdm.Int31()), 36)
-	return prefix + "-" + now + "-" + random
-}
-
-func createTable(ctx context.Context, svc AdminAPI, table string) error {
+func createTable(ctx context.Context, svc *dynamodb.Client, table string) error {
 	_, err := svc.CreateTable(ctx, &dynamodb.CreateTableInput{
 		AttributeDefinitions: []types.AttributeDefinition{
 			{
@@ -123,7 +114,7 @@ func createTable(ctx context.Context, svc AdminAPI, table string) error {
 
 }
 
-func deleteTable(ctx context.Context, svc AdminAPI, table string) error {
+func deleteTable(ctx context.Context, svc *dynamodb.Client, table string) error {
 	if _, err := svc.DeleteTable(ctx, &dynamodb.DeleteTableInput{
 		TableName: aws.String(table),
 	}); err != nil {
@@ -132,7 +123,7 @@ func deleteTable(ctx context.Context, svc AdminAPI, table string) error {
 	return nil
 }
 
-func waitForTable(ctx context.Context, svc AdminAPI, table string) error {
+func waitForTable(ctx context.Context, svc *dynamodb.Client, table string) error {
 	w := dynamodb.NewTableExistsWaiter(svc)
 	if err := w.Wait(ctx,
 		&dynamodb.DescribeTableInput{
