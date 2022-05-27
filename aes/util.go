@@ -1,25 +1,15 @@
 package aes
 
-import "errors"
+import (
+	"crypto/rand"
+	"io"
+)
 
-func pad(buf []byte, size int) ([]byte, error) {
-	bufLen := len(buf)
-	padLen := size - bufLen%size
-	padded := make([]byte, bufLen+padLen)
-	copy(padded, buf)
-	for i := 0; i < padLen; i++ {
-		padded[bufLen+i] = byte(padLen)
-	}
-	return padded, nil
-}
-
-func unpad(padded []byte, size int) ([]byte, error) {
-	if len(padded)%size != 0 {
-		return nil, errors.New("padded value wasn't in correct size")
+func GetRandomBytes(size uint16) []byte {
+	data := make([]byte, size)
+	if _, err := io.ReadFull(rand.Reader, data); err != nil {
+		panic(err)
 	}
 
-	bufLen := len(padded) - int(padded[len(padded)-1])
-	buf := make([]byte, bufLen)
-	copy(buf, padded[:bufLen])
-	return buf, nil
+	return data
 }
