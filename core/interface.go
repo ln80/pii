@@ -66,5 +66,5 @@ type KeyEngineCache interface {
 type Encrypter interface {
 	Encrypt(key Key, plainTxt string) (cypherTxt string, err error)
 	Decrypt(key Key, cypherTxt string) (plainTxt string, err error)
-	GenNewKey() string
+	// GenNewKey() string
 }

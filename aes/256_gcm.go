@@ -28,9 +28,9 @@ func New256GCMEncrypter() core.Encrypter {
 	return &aes256gcm{}
 }
 
-func (e *aes256gcm) GenNewKey() string {
-	return string(GetRandomBytes(AES265KeySize))
-}
+// func (e *aes256gcm) GenNewKey() string {
+// 	return string(GetRandomBytes(AES265KeySize))
+// }
 
 func (e *aes256gcm) Encrypt(key core.Key, plainTxt string) (string, error) {
 	block, err := aes.NewCipher([]byte(key[:]))
