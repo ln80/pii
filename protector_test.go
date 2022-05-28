@@ -33,7 +33,7 @@ func TestProtector(t *testing.T) {
 	}
 	opf2 := pf2
 
-	t.Run("encrypt-decrypt personal data with non-sence values", func(t *testing.T) {
+	t.Run("encrypt-decrypt personal data with nonsence values", func(t *testing.T) {
 		if err := p.Encrypt(ctx); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
@@ -73,7 +73,7 @@ func TestProtector(t *testing.T) {
 		}
 	})
 
-	t.Run("encrypt-decrypt personal data with invalid PII tag's configuration", func(t *testing.T) {
+	t.Run("encrypt-decrypt personal data with invalid PII tags", func(t *testing.T) {
 		tcs := []interface{}{
 			&testutil.InvalidStruct1{},
 			&testutil.InvalidStruct2{Val1: "id", Val2: "otherId"},
@@ -114,6 +114,65 @@ func TestProtector(t *testing.T) {
 		}
 		if want, got := opf2.Fullname, pf2.Fullname; want != got {
 			t.Fatalf("expect %v, %v be equals", want, got)
+		}
+	})
+
+	t.Run("encrypt-decrypt atomicity", func(t *testing.T) {
+		enc := &testutil.InstableEncrypterMock{
+			PointOfFailure: 2,
+		}
+
+		p := NewProtector(nspace, func(pc *ProtectorConfig) {
+			pc.Encrypter = enc
+		})
+
+		pf1 := testutil.Profile{
+			UserID:   "kal5430",
+			Fullname: "Idir Moore",
+			Gender:   "M",
+			Country:  "MA",
+		}
+		opf1 := pf1
+
+		pf2 := testutil.Profile{
+			UserID:   "hjl5a00",
+			Fullname: "Jav Koelpin",
+			Gender:   "M",
+			Country:  "DE",
+		}
+		opf2 := pf2
+
+		if err := p.Encrypt(ctx, &pf1, &pf2); err == nil {
+			t.Fatal("expect err be not nil")
+		}
+
+		if want, got := opf1, pf1; want != got {
+			t.Fatalf("expect %v, %v be equals", want, got)
+		}
+		if want, got := opf2, pf2; want != got {
+			t.Fatalf("expect %v, %v be equals", want, got)
+		}
+
+		enc.PointOfFailure = 1000
+		enc.ResetCounter()
+
+		if err := p.Encrypt(ctx, &pf1, &pf2); err != nil {
+			t.Fatal("expect err be nil, got", err)
+		}
+
+		enc.PointOfFailure = 2
+		enc.ResetCounter()
+
+		if err := p.Decrypt(ctx, &pf1, &pf2); err == nil {
+			t.Fatal("expect err be not nil")
+		}
+
+		// expect none of pii structs to be decrypted back to normal
+		if want, got := opf1, pf1; want == got {
+			t.Fatalf("expect %v, %v not be equals", want, got)
+		}
+		if want, got := opf2, pf2; want == got {
+			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
 	})
 

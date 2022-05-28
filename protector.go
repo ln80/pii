@@ -61,7 +61,7 @@ func NewProtector(namespace string, opts ...func(*ProtectorConfig)) Protector {
 	}
 
 	if p.CacheEnabled {
-		if _, ok := p.Engine.(core.KeyCacheEngine); !ok {
+		if _, ok := p.Engine.(core.KeyEngineCache); !ok {
 			p.Engine = memory.NewCacheWrapper(p.Engine, p.CacheTTL)
 		}
 	}
@@ -83,18 +83,45 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 		return err
 	}
 
-	for idx, s := range structs {
-		fn := func(i int, input string) (string, error) {
+	// two step process to ensure atomicity
+	buffer := make(map[int]map[int]string)
+
+	// first iteration over PII data performs a fake replacement:
+	// only to catch, encrypt and push field values to buffer
+	for structIdx, s := range structs {
+		buffer[structIdx] = make(map[int]string)
+		fn := func(fieldIdx int, val string) (string, error) {
 			key, ok := keys[s.subjectID()]
 			if !ok {
 				return "", ErrSubjectForgotten
 			}
-			return p.Encrypter.Encrypt(key, input)
+			newVal, err := p.Encrypter.Encrypt(key, val)
+			if err != nil {
+				return "", err
+			}
+			buffer[structIdx][fieldIdx] = newVal
+
+			return val, nil
 		}
 		if err := s.replace(fn); err != nil {
-			return fmt.Errorf("%w: at #%d", err, idx)
+			return fmt.Errorf("%w: at #%d", err, structIdx)
 		}
 	}
+
+	// once all PII data are encrypted & pushed to buffer
+	// iterate a second time to replace field values for real
+	for structIdx, s := range structs {
+		fn := func(fieldIdx int, val string) (string, error) {
+			if _, ok := buffer[structIdx][fieldIdx]; !ok {
+				return val, nil
+			}
+			return buffer[structIdx][fieldIdx], nil
+		}
+		if err := s.replace(fn); err != nil {
+			return fmt.Errorf("%w: at #%d", err, structIdx)
+		}
+	}
+
 	return nil
 }
 
@@ -113,16 +140,38 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 		return err
 	}
 
-	for idx, ps := range structs {
-		fn := func(i int, input string) (string, error) {
-			key, ok := keys[ps.subjectID()]
+	buffer := make(map[int]map[int]string)
+
+	for structIdx, s := range structs {
+		buffer[structIdx] = make(map[int]string)
+
+		fn := func(fieldIdx int, val string) (string, error) {
+			key, ok := keys[s.subjectID()]
 			if !ok {
-				return ps.replacements[i], nil
+				buffer[structIdx][fieldIdx] = s.replacements[fieldIdx]
+			} else {
+				newVal, err := p.Encrypter.Decrypt(key, val)
+				if err != nil {
+					return "", err
+				}
+				buffer[structIdx][fieldIdx] = newVal
 			}
-			return p.Encrypter.Decrypt(key, input)
+
+			return val, nil
 		}
-		if err := ps.replace(fn); err != nil {
-			return fmt.Errorf("%w: at #%d", err, idx)
+		if err := s.replace(fn); err != nil {
+			return fmt.Errorf("%w: at #%d", err, structIdx)
+		}
+	}
+	for structIdx, s := range structs {
+		fn := func(fieldIdx int, val string) (string, error) {
+			if _, ok := buffer[structIdx][fieldIdx]; !ok {
+				return val, nil
+			}
+			return buffer[structIdx][fieldIdx], nil
+		}
+		if err := s.replace(fn); err != nil {
+			return fmt.Errorf("%w: at #%d", err, structIdx)
 		}
 	}
 	return nil
@@ -159,8 +208,7 @@ func (p *protector) Recover(ctx context.Context, subID string) (err error) {
 }
 
 func (p *protector) Clear(ctx context.Context, force bool) error {
-	if cp, ok := p.Engine.(core.KeyCacheEngine); ok {
-		// log.Println("protector has cache", ok, p.CacheEnabled)
+	if cp, ok := p.Engine.(core.KeyEngineCache); ok {
 		return cp.ClearCache(ctx, p.namespace, force)
 	}
 
