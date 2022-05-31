@@ -11,19 +11,19 @@ var (
 	ErrEncryptionMock = errors.New("encryption errors mock")
 )
 
-var _ core.Encrypter = &InstableEncrypterMock{}
+var _ core.Encrypter = &UnstableEncrypterMock{}
 
-type InstableEncrypterMock struct {
+type UnstableEncrypterMock struct {
 	PointOfFailure, counter int
 	mu                      sync.RWMutex
 }
 
-func (e *InstableEncrypterMock) ResetCounter() {
+func (e *UnstableEncrypterMock) ResetCounter() {
 	e.counter = 0
 }
 
 // Decrypt implements core.Encrypter
-func (e *InstableEncrypterMock) Decrypt(key core.Key, cypherTxt string) (plainTxt string, err error) {
+func (e *UnstableEncrypterMock) Decrypt(key core.Key, cypherTxt string) (plainTxt string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -36,7 +36,7 @@ func (e *InstableEncrypterMock) Decrypt(key core.Key, cypherTxt string) (plainTx
 }
 
 // Encrypt implements core.Encrypter
-func (e *InstableEncrypterMock) Encrypt(key core.Key, plainTxt string) (cypherTxt string, err error) {
+func (e *UnstableEncrypterMock) Encrypt(key core.Key, plainTxt string) (cypherTxt string, err error) {
 	if e.counter >= e.PointOfFailure {
 		return "", ErrEncryptionMock
 	}

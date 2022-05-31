@@ -36,21 +36,21 @@ func (ps *piiStruct) subjectID() string {
 	return ps.prefix + ps.subID
 }
 
-func (s *piiStruct) replace(fn func(i int, input string) (string, error)) error {
-	for i, field := range s.fields {
+func (s *piiStruct) replace(fn func(fieldIdx int, val string) (string, error)) error {
+	for idx, field := range s.fields {
 		el := reflect.Indirect(s.reflectValue.FieldByName(field))
 		switch el.Kind() {
 		case reflect.String:
 			if el.CanSet() {
-				newVal, err := fn(i, el.String())
+				newVal, err := fn(idx, el.String())
 				if err != nil {
 					return err
 				}
 				el.SetString(newVal)
 			}
 		}
-
 	}
+
 	return nil
 }
 
