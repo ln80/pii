@@ -4,12 +4,42 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ln80/pii/aes"
 	"github.com/ln80/pii/core"
 	"github.com/ln80/pii/memory"
 )
+
+var (
+	// maybe add mask value as attr of pii identifier tag
+	// piiCypherReg = regexp.MustCompile(
+	// 	`<pii (\w+) ::> (.+)`,
+	// )
+
+	piiCypherIdentifier = "<pii::>"
+)
+
+func isEncryptedPII(cypher string) bool {
+	return strings.HasPrefix(cypher, piiCypherIdentifier) && len(cypher) > len(piiCypherIdentifier)
+}
+
+func packEncryptedPII(cypher string) string {
+	if isEncryptedPII(cypher) {
+		return cypher
+	}
+
+	return piiCypherIdentifier + cypher
+}
+
+func unpackEncryptedPII(cypher string) string {
+	if !isEncryptedPII(cypher) {
+		return ""
+	}
+
+	return cypher[len(piiCypherIdentifier):]
+}
 
 var (
 	ErrFailedToEncryptDecryptStructField = errors.New("failed to encrypt/decrypt struct field")
@@ -69,6 +99,15 @@ func NewProtector(namespace string, opts ...func(*ProtectorConfig)) Protector {
 	return p
 }
 
+func bufferToFieldFunc(buffer map[int]string) func(fieldIdx int, val string) (string, error) {
+	return func(fieldIdx int, val string) (string, error) {
+		if _, ok := buffer[fieldIdx]; !ok {
+			return val, nil
+		}
+		return buffer[fieldIdx], nil
+	}
+}
+
 func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) error {
 	structs, err := scan(structPtrs...)
 	if err != nil {
@@ -83,26 +122,38 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 		return err
 	}
 
-	// two step process to ensure atomicity
+	// two steps process to ensure atomicity
 	buffer := make(map[int]map[int]string)
 
 	// first iteration over PII data performs a fake replacement:
 	// only to catch, encrypt and push field values to buffer
 	for structIdx, s := range structs {
 		buffer[structIdx] = make(map[int]string)
-		fn := func(fieldIdx int, val string) (string, error) {
+		fn := func(fieldIdx int, val string) (newVal string, err error) {
+			// always return the current field value
+			defer func() {
+				newVal = val
+			}()
+
 			key, ok := keys[s.subjectID()]
 			if !ok {
-				return "", ErrSubjectForgotten
+				err = ErrSubjectForgotten
+				return
 			}
-			newVal, err := p.Encrypter.Encrypt(key, val)
-			if err != nil {
-				return "", err
+			// idempotency: no need to re-encrypt field value if is already encrypted
+			if isEncryptedPII(val) {
+				buffer[structIdx][fieldIdx] = val
+				return
 			}
-			buffer[structIdx][fieldIdx] = newVal
 
-			return val, nil
+			encVal, err := p.Encrypter.Encrypt(key, val)
+			if err != nil {
+				return
+			}
+			buffer[structIdx][fieldIdx] = packEncryptedPII(encVal)
+			return
 		}
+
 		if err := s.replace(fn); err != nil {
 			return fmt.Errorf("%w: at #%d", err, structIdx)
 		}
@@ -111,13 +162,7 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 	// once all PII data are encrypted & pushed to buffer
 	// iterate a second time to replace field values for real
 	for structIdx, s := range structs {
-		fn := func(fieldIdx int, val string) (string, error) {
-			if _, ok := buffer[structIdx][fieldIdx]; !ok {
-				return val, nil
-			}
-			return buffer[structIdx][fieldIdx], nil
-		}
-		if err := s.replace(fn); err != nil {
+		if err := s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
 			return fmt.Errorf("%w: at #%d", err, structIdx)
 		}
 	}
@@ -145,32 +190,39 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 	for structIdx, s := range structs {
 		buffer[structIdx] = make(map[int]string)
 
-		fn := func(fieldIdx int, val string) (string, error) {
+		fn := func(fieldIdx int, val string) (newVal string, err error) {
+			// always return the current field value
+			defer func() {
+				newVal = val
+			}()
+
 			key, ok := keys[s.subjectID()]
 			if !ok {
 				buffer[structIdx][fieldIdx] = s.replacements[fieldIdx]
 			} else {
-				newVal, err := p.Encrypter.Decrypt(key, val)
+				// make sure not to try decrypt a plain text value
+				if !isEncryptedPII(val) {
+					buffer[structIdx][fieldIdx] = val
+					return
+				}
+
+				val = unpackEncryptedPII(val)
+				plainVal, err := p.Encrypter.Decrypt(key, val)
 				if err != nil {
 					return "", err
 				}
-				buffer[structIdx][fieldIdx] = newVal
+				buffer[structIdx][fieldIdx] = plainVal
 			}
 
-			return val, nil
+			return
 		}
 		if err := s.replace(fn); err != nil {
 			return fmt.Errorf("%w: at #%d", err, structIdx)
 		}
 	}
+
 	for structIdx, s := range structs {
-		fn := func(fieldIdx int, val string) (string, error) {
-			if _, ok := buffer[structIdx][fieldIdx]; !ok {
-				return val, nil
-			}
-			return buffer[structIdx][fieldIdx], nil
-		}
-		if err := s.replace(fn); err != nil {
+		if err := s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
 			return fmt.Errorf("%w: at #%d", err, structIdx)
 		}
 	}
@@ -178,18 +230,11 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 }
 
 func (p *protector) Forget(ctx context.Context, subID string) (err error) {
-	// defers are LIFO
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("%w: subject: %s, details: %v", ErrFailedToForgetSubject, subID, err)
 		}
 	}()
-
-	// defer func() {
-	// 	if errors.Is(err, core.ErrUnsupportedKeyOperation) {
-	// 		err = p.Engine.DeleteKey(ctx, p.namespace, subID)
-	// 	}
-	// }()
 
 	if p.GracefullMode {
 		return p.Engine.DisableKey(ctx, p.namespace, subID)

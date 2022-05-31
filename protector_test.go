@@ -3,11 +3,58 @@ package pii
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/ln80/pii/testutil"
 )
 
+func TestProtector_PackUnpackCypher(t *testing.T) {
+
+	tcs := []struct {
+		cypher      string
+		isEncrypted bool
+	}{
+		{
+			"",
+			false,
+		},
+		{
+			"<pii::>",
+			false,
+		},
+		{
+			"<pii::f3:25:7e:44:3f:65",
+			false,
+		},
+		{
+			"<PII::f3:25:7e:44:3f:65",
+			false,
+		},
+		{
+			"<pii::>f3:25:7e:44:3f:65",
+			true,
+		},
+	}
+
+	for i, tc := range tcs {
+		t.Run("tc: "+strconv.Itoa(i), func(t *testing.T) {
+			if tc.isEncrypted {
+				if ok := isEncryptedPII(tc.cypher); !ok {
+					t.Fatal("expect cypher be encrypted")
+				}
+				cypher := unpackEncryptedPII(tc.cypher)
+				if len(cypher) == 0 {
+					t.Fatal("expect unpacked cypher be not empty")
+				}
+			} else {
+				if ok := isEncryptedPII(tc.cypher); ok {
+					t.Fatal("expect cypher not be packed")
+				}
+			}
+		})
+	}
+}
 func TestProtector(t *testing.T) {
 	ctx := context.Background()
 
@@ -82,7 +129,6 @@ func TestProtector(t *testing.T) {
 		want := ErrInvalidTagConfiguration
 		for _, value := range tcs {
 			err := p.Encrypt(ctx, value)
-			t.Log("err", err)
 			if !errors.Is(err, want) {
 				t.Errorf("expect err be '%v', got '%v'", want, err)
 			}
@@ -105,7 +151,7 @@ func TestProtector(t *testing.T) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
 
-		// assert personal data are mutated back to their original values
+		// assert personal data are mutated back to their plain text values
 		if err := p.Decrypt(ctx, &pf1, &pf2); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
@@ -118,7 +164,7 @@ func TestProtector(t *testing.T) {
 	})
 
 	t.Run("encrypt-decrypt atomicity", func(t *testing.T) {
-		enc := &testutil.InstableEncrypterMock{
+		enc := &testutil.UnstableEncrypterMock{
 			PointOfFailure: 2,
 		}
 
@@ -146,6 +192,7 @@ func TestProtector(t *testing.T) {
 			t.Fatal("expect err be not nil")
 		}
 
+		// expect pii structs to be different from originals
 		if want, got := opf1, pf1; want != got {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
@@ -153,6 +200,7 @@ func TestProtector(t *testing.T) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 
+		// make sure not to fail encryption
 		enc.PointOfFailure = 1000
 		enc.ResetCounter()
 
@@ -173,6 +221,44 @@ func TestProtector(t *testing.T) {
 		}
 		if want, got := opf2, pf2; want == got {
 			t.Fatalf("expect %v, %v not be equals", want, got)
+		}
+	})
+
+	t.Run("encrypt-decrypt idempotency", func(t *testing.T) {
+		p := NewProtector(nspace)
+
+		pf1 := testutil.Profile{
+			UserID:   "kal5430",
+			Fullname: "Idir Moore",
+			Gender:   "M",
+			Country:  "MA",
+		}
+
+		// successfully encrypt pii struct & save a copy of encrypted struct
+		if err := p.Encrypt(ctx, &pf1); err != nil {
+			t.Fatal("expect err be nil, got", err)
+		}
+		encpf1 := pf1
+
+		// try to re-encrypt & make sure that pii field values remain the same
+		if err := p.Encrypt(ctx, &pf1); err != nil {
+			t.Fatal("expect err be nil, got", err)
+		}
+		if want, got := encpf1, pf1; want != got {
+			t.Fatalf("expect %v, %v be equals", want, got)
+		}
+
+		// same logic applies to decrypt...
+		if err := p.Decrypt(ctx, &pf1); err != nil {
+			t.Fatal("expect err be nil, got", err)
+		}
+		decpf1 := pf1
+
+		if err := p.Decrypt(ctx, &pf1); err != nil {
+			t.Fatal("expect err be nil, got", err)
+		}
+		if want, got := decpf1, pf1; want != got {
+			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 	})
 
