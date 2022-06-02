@@ -1,3 +1,5 @@
+// Package pii offers a set of tools to deal with
+// Personal Identified Information in struct-field level
 package pii
 
 import (
@@ -5,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ln80/pii/aes"
@@ -13,32 +16,30 @@ import (
 )
 
 var (
-	// maybe add mask value as attr of pii identifier tag
-	// piiCypherReg = regexp.MustCompile(
-	// 	`<pii (\w+) ::> (.+)`,
+	// add support for attrs?
+	// packReg = regexp.MustCompile(
+	// 	`<pii:(.*):(.+)`,
 	// )
 
-	piiCypherIdentifier = "<pii::>"
+	packPrefix = "<pii::"
 )
 
-func isEncryptedPII(cypher string) bool {
-	return strings.HasPrefix(cypher, piiCypherIdentifier) && len(cypher) > len(piiCypherIdentifier)
+func isPackedPII(cypher string) bool {
+	return strings.HasPrefix(cypher, packPrefix) && len(cypher) > len(packPrefix)
 }
 
-func packEncryptedPII(cypher string) string {
-	if isEncryptedPII(cypher) {
+func packPII(cypher string) string {
+	if isPackedPII(cypher) {
 		return cypher
 	}
-
-	return piiCypherIdentifier + cypher
+	return packPrefix + cypher
 }
 
-func unpackEncryptedPII(cypher string) string {
-	if !isEncryptedPII(cypher) {
+func unpackPII(cypher string) string {
+	if !isPackedPII(cypher) {
 		return ""
 	}
-
-	return cypher[len(piiCypherIdentifier):]
+	return cypher[len(packPrefix):]
 }
 
 var (
@@ -48,14 +49,18 @@ var (
 	ErrSubjectForgotten                  = errors.New("subject is likely forgotten")
 )
 
+// Protector presents the entry point service that encrypt, decrypt and crypto-erase
+// subject's Personal data
 type Protector interface {
 	Encrypt(ctx context.Context, structPts ...interface{}) error
 	Decrypt(ctx context.Context, structPts ...interface{}) error
 	Forget(ctx context.Context, subID string) error
 	Recover(ctx context.Context, subID string) error
 	Clear(ctx context.Context, force bool) error
+	LastActiveAt() time.Time
 }
 
+// ProtectorConfig presents Protector service configuration
 type ProtectorConfig struct {
 	Engine        core.KeyEngine
 	Encrypter     core.Encrypter
@@ -67,16 +72,23 @@ type ProtectorConfig struct {
 type protector struct {
 	namespace string
 
+	opAt time.Time
+	opMu sync.RWMutex
+
 	*ProtectorConfig
 }
 
 var _ Protector = &protector{}
 
+// NewProtector returns a Protector service instance.
+// It requires a namespace for the service, and accepts options to overwrite the default configuration.
+//
+// Options must fulfill protector core.KeyEngine dependency. Otherwise, the function may panic.
 func NewProtector(namespace string, opts ...func(*ProtectorConfig)) Protector {
 	p := &protector{
 		namespace: namespace,
 		ProtectorConfig: &ProtectorConfig{
-			Engine:        memory.NewKeyEngine(),
+			// Engine:        memory.NewKeyEngine(),
 			Encrypter:     aes.New256GCMEncrypter(),
 			CacheEnabled:  true,
 			GracefullMode: true,
@@ -90,15 +102,23 @@ func NewProtector(namespace string, opts ...func(*ProtectorConfig)) Protector {
 		opt(p.ProtectorConfig)
 	}
 
+	if p.Engine == nil {
+		panic("invalid Key Engine service, nil value found")
+	}
+
 	if p.CacheEnabled {
 		if _, ok := p.Engine.(core.KeyEngineCache); !ok {
 			p.Engine = memory.NewCacheWrapper(p.Engine, p.CacheTTL)
 		}
 	}
 
+	p.markOp()
+
 	return p
 }
 
+// bufferToFieldFunc is a helper func used by Encrypt & Decrypt methods
+// to ensure atomicity in case of bulk ops.
 func bufferToFieldFunc(buffer map[int]string) func(fieldIdx int, val string) (string, error) {
 	return func(fieldIdx int, val string) (string, error) {
 		if _, ok := buffer[fieldIdx]; !ok {
@@ -109,6 +129,8 @@ func bufferToFieldFunc(buffer map[int]string) func(fieldIdx int, val string) (st
 }
 
 func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) error {
+	defer p.markOp()
+
 	structs, err := scan(structPtrs...)
 	if err != nil {
 		return err
@@ -140,8 +162,9 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 				err = ErrSubjectForgotten
 				return
 			}
-			// idempotency: no need to re-encrypt field value if is already encrypted
-			if isEncryptedPII(val) {
+			// idempotency: no need to re-encrypt field value if it's packed
+			// which implies it's already encrypted unless a corruption occurred
+			if isPackedPII(val) {
 				buffer[structIdx][fieldIdx] = val
 				return
 			}
@@ -150,7 +173,7 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 			if err != nil {
 				return
 			}
-			buffer[structIdx][fieldIdx] = packEncryptedPII(encVal)
+			buffer[structIdx][fieldIdx] = packPII(encVal)
 			return
 		}
 
@@ -171,6 +194,8 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 }
 
 func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
+	defer p.markOp()
+
 	structs, err := scan(values...)
 	if err != nil {
 		return err
@@ -200,14 +225,14 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 			if !ok {
 				buffer[structIdx][fieldIdx] = s.replacements[fieldIdx]
 			} else {
-				// make sure not to try decrypt a plain text value
-				if !isEncryptedPII(val) {
+				// make sure not to decrypt a plain text value
+				// unpacked implies decrypted YOLO
+				if !isPackedPII(val) {
 					buffer[structIdx][fieldIdx] = val
 					return
 				}
 
-				val = unpackEncryptedPII(val)
-				plainVal, err := p.Encrypter.Decrypt(key, val)
+				plainVal, err := p.Encrypter.Decrypt(key, unpackPII(val))
 				if err != nil {
 					return "", err
 				}
@@ -230,6 +255,8 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 }
 
 func (p *protector) Forget(ctx context.Context, subID string) (err error) {
+	defer p.markOp()
+
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("%w: subject: %s, details: %v", ErrFailedToForgetSubject, subID, err)
@@ -244,11 +271,14 @@ func (p *protector) Forget(ctx context.Context, subID string) (err error) {
 }
 
 func (p *protector) Recover(ctx context.Context, subID string) (err error) {
+	defer p.markOp()
+
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("%w: %s, details: %v", ErrFailedToRecoverSubject, subID, err)
 		}
 	}()
+
 	return p.Engine.RenableKey(ctx, p.namespace, subID)
 }
 
@@ -258,4 +288,19 @@ func (p *protector) Clear(ctx context.Context, force bool) error {
 	}
 
 	return nil
+}
+
+// LastActiveAt implements Protector
+func (p *protector) LastActiveAt() time.Time {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+
+	return p.opAt
+}
+
+func (p *protector) markOp() {
+	p.opMu.Lock()
+	defer p.opMu.Unlock()
+
+	p.opAt = time.Now()
 }

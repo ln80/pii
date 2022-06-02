@@ -6,62 +6,62 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ln80/pii/memory"
 	"github.com/ln80/pii/testutil"
 )
 
-func TestProtector_PackUnpackCypher(t *testing.T) {
-
+func TestProtector_PackUnpack(t *testing.T) {
 	tcs := []struct {
-		cypher      string
-		isEncrypted bool
+		cypher   string
+		isPacked bool
 	}{
 		{
 			"",
 			false,
 		},
 		{
-			"<pii::>",
+			"<pii::",
 			false,
 		},
 		{
-			"<pii::f3:25:7e:44:3f:65",
+			"<pii:211e98defd732758b63db24bbc05641684a13541a4e6035ddbf3820d86620d9a18e2f8e99c2a06",
 			false,
 		},
 		{
-			"<PII::f3:25:7e:44:3f:65",
+			"<PII::211e98defd732758b63db24bbc05641684a13541a4e6035ddbf3820d86620d9a18e2f8e99c2a06",
 			false,
 		},
 		{
-			"<pii::>f3:25:7e:44:3f:65",
+			"<pii::211e98defd732758b63db24bbc05641684a13541a4e6035ddbf3820d86620d9a18e2f8e99c2a06",
 			true,
 		},
 	}
 
 	for i, tc := range tcs {
 		t.Run("tc: "+strconv.Itoa(i), func(t *testing.T) {
-			if tc.isEncrypted {
-				if ok := isEncryptedPII(tc.cypher); !ok {
-					t.Fatal("expect cypher be encrypted")
+			if tc.isPacked {
+				if ok := isPackedPII(tc.cypher); !ok {
+					t.Fatal("expect cypher be packed")
 				}
-				cypher := unpackEncryptedPII(tc.cypher)
+				cypher := unpackPII(tc.cypher)
 				if len(cypher) == 0 {
 					t.Fatal("expect unpacked cypher be not empty")
 				}
 			} else {
-				if ok := isEncryptedPII(tc.cypher); ok {
+				if ok := isPackedPII(tc.cypher); ok {
 					t.Fatal("expect cypher not be packed")
 				}
 			}
 		})
 	}
 }
-func TestProtector(t *testing.T) {
+func TestProtector_EncryptDecrypt(t *testing.T) {
 	ctx := context.Background()
 
 	nspace := "tenantID"
 
 	p := NewProtector(nspace, func(pc *ProtectorConfig) {
-		// setup a default protector service backed by an in-memory key engine
+		pc.Engine = memory.NewKeyEngine()
 	})
 
 	pf1 := testutil.Profile{
@@ -170,6 +170,7 @@ func TestProtector(t *testing.T) {
 
 		p := NewProtector(nspace, func(pc *ProtectorConfig) {
 			pc.Encrypter = enc
+			pc.Engine = memory.NewKeyEngine()
 		})
 
 		pf1 := testutil.Profile{
@@ -225,7 +226,9 @@ func TestProtector(t *testing.T) {
 	})
 
 	t.Run("encrypt-decrypt idempotency", func(t *testing.T) {
-		p := NewProtector(nspace)
+		p := NewProtector(nspace, func(pc *ProtectorConfig) {
+			pc.Engine = memory.NewKeyEngine()
+		})
 
 		pf1 := testutil.Profile{
 			UserID:   "kal5430",

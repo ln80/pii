@@ -16,23 +16,41 @@ type Factory interface {
 	Monitor(ctx context.Context)
 }
 
+type FactoryConfig struct {
+	IDLE, MonitorPeriod time.Duration
+}
+
 type factory struct {
 	mu      sync.RWMutex
 	reg     map[string]Protector
 	builder BuildFunc
+	*FactoryConfig
 }
 
-func NewFactory(b BuildFunc) Factory {
+func NewFactory(b BuildFunc, opts ...func(*FactoryConfig)) Factory {
 	if b == nil {
 		b = func(nspace string) Protector {
 			return NewProtector(nspace)
 		}
 	}
 
-	return &factory{
+	f := &factory{
 		reg:     make(map[string]Protector),
 		builder: b,
+		FactoryConfig: &FactoryConfig{
+			IDLE:          20 * time.Minute,
+			MonitorPeriod: 5 * time.Second,
+		},
 	}
+
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(f.FactoryConfig)
+	}
+
+	return f
 }
 
 func (f *factory) Instance(namespace string) (Protector, ClearFunc) {
@@ -44,8 +62,8 @@ func (f *factory) Instance(namespace string) (Protector, ClearFunc) {
 	}
 
 	clearFunc := func() {
-		// force Protector to clear cache without considering the current context.
-		// ignore the error return which unlikely occure
+		// Force Protector to clear cache without considering the current context.
+		// Ignore the returned error, which unlikely to occure.
 		_ = f.reg[namespace].Clear(context.Background(), true)
 	}
 
@@ -56,13 +74,20 @@ func (f *factory) clear(ctx context.Context, force bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	for _, p := range f.reg {
+	for nspace, p := range f.reg {
+		// clear protector encryption materials cache
+		// internally, Protector.Clear will check and proceed based on Protector.CacheTTL
 		_ = p.Clear(ctx, force)
+
+		// remove inactive protectors based on last activity timestamp
+		if t := p.LastActiveAt(); !t.IsZero() && t.Add(f.IDLE).Before(time.Now()) || force {
+			delete(f.reg, nspace)
+		}
 	}
 }
 
 func (f *factory) Monitor(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(f.MonitorPeriod)
 	go func() {
 		defer f.clear(ctx, true)
 
@@ -70,6 +95,7 @@ func (f *factory) Monitor(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
+
 			case <-ticker.C:
 				f.clear(ctx, false)
 			}
