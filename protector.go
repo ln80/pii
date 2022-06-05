@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ln80/pii/aes"
@@ -68,7 +67,7 @@ type Protector interface {
 	Forget(ctx context.Context, subID string) error
 	Recover(ctx context.Context, subID string) error
 	Clear(ctx context.Context, force bool) error
-	LastActiveAt() time.Time
+	// LastActiveAt() time.Time
 }
 
 // ProtectorConfig presents Protector service configuration
@@ -82,9 +81,6 @@ type ProtectorConfig struct {
 
 type protector struct {
 	namespace string
-
-	opAt time.Time
-	opMu sync.RWMutex
 
 	*ProtectorConfig
 }
@@ -129,8 +125,6 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 		}
 	}
 
-	p.markOp()
-
 	return p
 }
 
@@ -147,7 +141,6 @@ func bufferToFieldFunc(buffer map[int]string) func(fieldIdx int, val string) (st
 
 // Encrypt implements Protector
 func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err error) {
-	defer p.markOp()
 
 	defer func() {
 		if err != nil {
@@ -222,7 +215,6 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err
 
 // Encrypt implements Protector
 func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err error) {
-	defer p.markOp()
 
 	defer func() {
 		if err != nil {
@@ -294,7 +286,6 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err err
 
 // Encrypt implements Protector
 func (p *protector) Forget(ctx context.Context, subID string) (err error) {
-	defer p.markOp()
 
 	defer func() {
 		if err != nil {
@@ -316,7 +307,6 @@ func (p *protector) Forget(ctx context.Context, subID string) (err error) {
 
 // Encrypt implements Protector
 func (p *protector) Recover(ctx context.Context, subID string) (err error) {
-	defer p.markOp()
 
 	defer func() {
 		if err != nil {
@@ -356,19 +346,4 @@ func (p *protector) Clear(ctx context.Context, force bool) (err error) {
 	}
 
 	return
-}
-
-// LastActiveAt implements Protector
-func (p *protector) LastActiveAt() time.Time {
-	p.opMu.Lock()
-	defer p.opMu.Unlock()
-
-	return p.opAt
-}
-
-func (p *protector) markOp() {
-	p.opMu.Lock()
-	defer p.opMu.Unlock()
-
-	p.opAt = time.Now()
 }

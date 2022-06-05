@@ -56,7 +56,9 @@ func (f *factory) Instance(namespace string) (Protector, ClearFunc) {
 	defer f.mu.Unlock()
 
 	if _, ok := f.reg[namespace]; !ok {
-		f.reg[namespace] = f.builder(namespace)
+		tp := &traceable{Protector: f.builder(namespace)}
+		f.reg[namespace] = tp
+		tp.markOp()
 	}
 
 	clearFunc := func() {
@@ -78,7 +80,8 @@ func (f *factory) clear(ctx context.Context, force bool) {
 		_ = p.Clear(ctx, force)
 
 		// remove inactive protectors based on last activity timestamp
-		if t := p.LastActiveAt(); !t.IsZero() && t.Add(f.IDLE).Before(time.Now()) || force {
+		tp, ok := p.(*traceable)
+		if t := tp.lastOpsAt; ok && !t.IsZero() && t.Add(f.IDLE).Before(time.Now()) || force {
 			delete(f.reg, nspace)
 		}
 	}
@@ -100,15 +103,3 @@ func (f *factory) Monitor(ctx context.Context) {
 		}
 	}()
 }
-
-// func ProofRead() {
-
-// 	f := NewFactory(nil)
-// 	f.Monitor(context.TODO())
-
-// 	p, clear := f.Instance("tenantID")
-// 	defer clear()
-
-// 	p.Encrypt(context.TODO())
-
-// }

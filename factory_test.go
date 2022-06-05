@@ -72,15 +72,15 @@ func TestFactory(t *testing.T) {
 	time.Sleep(margin)
 	time.Sleep(period)
 
-	p1.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
-	p2.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
+	p1.(*traceable).Protector.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
+	p2.(*traceable).Protector.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
 
 	// assert Monitor periodically clears resources
 	time.Sleep(period)
 
-	p1.(*spyProtector).Calls.AssertCount(t, "Clear", 2)
+	p1.(*traceable).Protector.(*spyProtector).Calls.AssertCount(t, "Clear", 2)
 
-	p2.(*spyProtector).Calls.AssertCount(t, "Clear", 2)
+	p2.(*traceable).Protector.(*spyProtector).Calls.AssertCount(t, "Clear", 2)
 
 	// assert sure Factory already deleted inactive Protectors from registry
 	time.Sleep(idle)
@@ -98,7 +98,7 @@ func TestFactory(t *testing.T) {
 	time.Sleep(margin)
 	time.Sleep(period)
 
-	p3.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
+	p3.(*traceable).Protector.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
 
 	cancelCtx()
 
