@@ -32,10 +32,37 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
-
+    
+      - name: Install Dependencies
+        run: go mod download
+        env:
+          GOPROXY: https://proxy.golang.org,direct
+  
       - name: Run Unit & Functional tests
         run: |
           make test
         env:
           DYNAMODB_ENDPOINT: http://localhost:8070
           KMS_ENDPOINT: http://localhost:8090
+
+      - name: Verify Version Changed
+        uses: tj-actions/changed-files@v19
+        if: ${{ (github.event_name == 'push') }}
+        id: version-changed
+        with:
+          files: |
+             version.go
+
+      - name: Read Current Version
+        if: ${{ (steps.version-changed.outputs.any_changed == 'true') && (github.event_name == 'push') }}
+        run: |
+          grep 'const VERSION' version.go | sed -e 's/const VERSION Version = "\(v[^"]*\)"/PII_VERSION=\1/' >> $GITHUB_ENV
+      
+      - name: "Release Module"
+        if: ${{ (steps.version-changed.outputs.any_changed == 'true') && (github.event_name == 'push') }}
+        run: |
+          tag=${{ env.PII_VERSION }}
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git tag -a "${tag}"
+          git push origin "${tag}"
