@@ -1,0 +1,71 @@
+name: PII Go Module Test & Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-release:
+    runs-on: ubuntu-latest
+    services:
+      dynamodb:
+        image: amazon/dynamodb-local
+        ports:
+          - 8070:8000
+      kms:
+        image: nsmithuk/local-kms
+        ports:
+          - 8090:8080
+      
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: "0"
+
+      - name: Setup Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+    
+      - name: Install Dependencies
+        run: go mod download
+        env:
+          GOPROXY: https://proxy.golang.org,direct
+  
+      - name: Run Unit & Functional tests
+        run: |
+          make ci/test
+        env:
+          DYNAMODB_ENDPOINT: http://localhost:8070
+          KMS_ENDPOINT: http://localhost:8090
+
+      - name: Upload Test Coverage
+        if: ${{ (github.event_name == 'push') }}
+        run: |
+          go install github.com/mattn/goveralls@latest
+          goveralls -coverprofile=coverage.out -repotoken=${{ secrets.COVERALLS_TOKEN }}
+
+      - name: Verify Version Changed
+        uses: tj-actions/changed-files@v19
+        if: ${{ (github.event_name == 'push') }}
+        id: version-changed
+        with:
+          files: |
+             version.go
+
+      - name: Read Current Version
+        if: ${{ (steps.version-changed.outputs.any_changed == 'true') && (github.event_name == 'push') }}
+        run: |
+          grep 'const VERSION' version.go | sed -e 's/const VERSION Version = "\(v[^"]*\)"/PII_VERSION=\1/' >> $GITHUB_ENV
+      
+      - name: Release Module
+        if: ${{ (steps.version-changed.outputs.any_changed == 'true') && (github.event_name == 'push') }}
+        run: |
+          tag=${{ env.PII_VERSION }}
+          msg=${{ github.event.head_commit.message }}
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git tag -a "${tag}" -m "${msg}"
+          git push origin "${tag}"
