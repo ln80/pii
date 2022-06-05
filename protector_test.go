@@ -6,13 +6,14 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ln80/pii/core"
 	"github.com/ln80/pii/memory"
 	"github.com/ln80/pii/testutil"
 )
 
 func TestProtector_PackUnpack(t *testing.T) {
 	tcs := []struct {
-		cypher   string
+		cipher   string
 		isPacked bool
 	}{
 		{
@@ -40,16 +41,16 @@ func TestProtector_PackUnpack(t *testing.T) {
 	for i, tc := range tcs {
 		t.Run("tc: "+strconv.Itoa(i), func(t *testing.T) {
 			if tc.isPacked {
-				if ok := isPackedPII(tc.cypher); !ok {
-					t.Fatal("expect cypher be packed")
+				if ok := isPackedPII(tc.cipher); !ok {
+					t.Fatal("expect cipher be packed")
 				}
-				cypher := unpackPII(tc.cypher)
-				if len(cypher) == 0 {
-					t.Fatal("expect unpacked cypher be not empty")
+				cipher := unpackPII(tc.cipher)
+				if len(cipher) == 0 {
+					t.Fatal("expect unpacked cipher be not empty")
 				}
 			} else {
-				if ok := isPackedPII(tc.cypher); ok {
-					t.Fatal("expect cypher not be packed")
+				if ok := isPackedPII(tc.cipher); ok {
+					t.Fatal("expect cipher not be packed")
 				}
 			}
 		})
@@ -58,11 +59,9 @@ func TestProtector_PackUnpack(t *testing.T) {
 func TestProtector_EncryptDecrypt(t *testing.T) {
 	ctx := context.Background()
 
-	nspace := "tenantID"
+	nspace := "tenant-d195kla"
 
-	p := NewProtector(nspace, func(pc *ProtectorConfig) {
-		pc.Engine = memory.NewKeyEngine()
-	})
+	p := NewProtector(nspace, memory.NewKeyEngine())
 
 	pf1 := testutil.Profile{
 		UserID:   "kal5430",
@@ -120,7 +119,23 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 	})
 
-	t.Run("encrypt-decrypt personal data with invalid PII tags", func(t *testing.T) {
+	t.Run("encrypt-decrypt unsupported field type", func(t *testing.T) {
+		tcs := []interface{}{
+			&testutil.InvalidStruct3{Val1: "id", Val2: 30},
+		}
+
+		want := ErrUnsupportedFieldType
+		for _, value := range tcs {
+			if err := p.Encrypt(ctx, value); !errors.Is(err, want) {
+				t.Errorf("expect err be %v, got %v", want, err)
+			}
+			if err := p.Decrypt(ctx, value); !errors.Is(err, want) {
+				t.Errorf("expect err be %v, got %v", want, err)
+			}
+		}
+	})
+
+	t.Run("encrypt-decrypt personal data with invalid tag configuration", func(t *testing.T) {
 		tcs := []interface{}{
 			&testutil.InvalidStruct1{},
 			&testutil.InvalidStruct2{Val1: "id", Val2: "otherId"},
@@ -129,6 +144,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		want := ErrInvalidTagConfiguration
 		for _, value := range tcs {
 			err := p.Encrypt(ctx, value)
+			t.Log("err ---->", err)
 			if !errors.Is(err, want) {
 				t.Errorf("expect err be '%v', got '%v'", want, err)
 			}
@@ -143,7 +159,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 			t.Fatal("expect err be nil, got", err)
 		}
 
-		// assert personal data are mutated (to a cypher text)
+		// assert personal data are mutated (to a cipher text)
 		if want, got := opf1.Fullname, pf1.Fullname; want == got {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
@@ -168,9 +184,8 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 			PointOfFailure: 2,
 		}
 
-		p := NewProtector(nspace, func(pc *ProtectorConfig) {
+		p := NewProtector(nspace, memory.NewKeyEngine(), func(pc *ProtectorConfig) {
 			pc.Encrypter = enc
-			pc.Engine = memory.NewKeyEngine()
 		})
 
 		pf1 := testutil.Profile{
@@ -189,8 +204,8 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 		opf2 := pf2
 
-		if err := p.Encrypt(ctx, &pf1, &pf2); err == nil {
-			t.Fatal("expect err be not nil")
+		if want, err := core.ErrEnryptionFailure, p.Encrypt(ctx, &pf1, &pf2); !errors.Is(err, want) {
+			t.Fatalf("expect err be %v, got %v", want, err)
 		}
 
 		// expect pii structs to be different from originals
@@ -212,7 +227,8 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		enc.PointOfFailure = 2
 		enc.ResetCounter()
 
-		if err := p.Decrypt(ctx, &pf1, &pf2); err == nil {
+		err := p.Decrypt(ctx, &pf1, &pf2)
+		if err == nil {
 			t.Fatal("expect err be not nil")
 		}
 
@@ -226,9 +242,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 	})
 
 	t.Run("encrypt-decrypt idempotency", func(t *testing.T) {
-		p := NewProtector(nspace, func(pc *ProtectorConfig) {
-			pc.Engine = memory.NewKeyEngine()
-		})
+		p := NewProtector(nspace, memory.NewKeyEngine())
 
 		pf1 := testutil.Profile{
 			UserID:   "kal5430",
@@ -265,7 +279,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 	})
 
-	t.Run("crypto-shred personal data", func(t *testing.T) {
+	t.Run("crypto-erase personal data", func(t *testing.T) {
 		pf := testutil.Profile{
 			UserID:   "dal5431",
 			Fullname: "Idir Moore",
@@ -274,12 +288,15 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 		opf := pf
 
-		// assert personal data are ecnrypted & mutated (to a cypher text)
+		// assert personal data are encrypted and changed (to a cipher text)
 		if err := p.Encrypt(ctx, &pf); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
 		if want, got := opf.Fullname, pf.Fullname; want == got {
 			t.Fatalf("expect %v, %v not be equals", want, got)
+		}
+		if val := pf.Fullname; !isPackedPII(val) {
+			t.Fatalf("expect %s be packed and encrypted", val)
 		}
 
 		// forget subjectID i.e, forget subjectID's encryption key
@@ -302,6 +319,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if want, err := ErrSubjectForgotten, p.Encrypt(ctx, &pf); !errors.Is(err, want) {
 			t.Fatalf("expect err be %v, got %v", want, err)
 		}
+
 		// succefully recover a subjectID encryption material (optional, Key engine may not support it)
 		if err := p.Recover(ctx, pf.TEST_PII_SubjectID()); err != nil {
 			t.Fatal("expect err be nil, got", err)
@@ -319,6 +337,21 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 		if want, got := pf.TEST_PII_Replacement("Gender"), pf.Gender; want != got {
 			t.Fatalf("expect %v, %v be equals", want, got)
+		}
+
+		// forget subject for real, and assert we are unable to recover it
+		// p2 := NewProtector(nspace, func(pc *ProtectorConfig) {
+		// 	pc.Engine = memory.NewKeyEngine()
+		// 	pc.GracefullMode = false
+		// })
+
+		p.(*protector).GracefullMode = false
+
+		if err := p.Forget(ctx, pf.TEST_PII_SubjectID()); err != nil {
+			t.Fatal("expect err be nil, got", err)
+		}
+		if want, err := ErrUnableRecoverSubject, p.Recover(ctx, pf.TEST_PII_SubjectID()); !errors.Is(err, want) {
+			t.Fatalf("expect err be %v, got %v", want, err)
 		}
 	})
 }

@@ -16,11 +16,9 @@ var (
 )
 
 var (
-	ErrUnsupportedType = errors.New("unsupported type, must be a struct pointer")
-
+	ErrUnsupportedType         = errors.New("unsupported type must be a struct pointer")
+	ErrUnsupportedFieldType    = errors.New("unsupported field type must be 'Exported string'")
 	ErrInvalidTagConfiguration = errors.New("invalid tag configuration")
-	errSubjectIDNotfound       = errors.New("subjectID not found")
-	errSubjectIDManyDefinition = errors.New("subjectID defined multiple time")
 )
 
 type piiStruct struct {
@@ -71,7 +69,7 @@ func (m piiMap) subjectIDs() []string {
 	return subIDs
 }
 
-func indexOfOpt(optName string, opts []string) int {
+func indexOfTagOpt(optName string, opts []string) int {
 	for k, v := range opts {
 		if optName == v {
 			return k
@@ -98,7 +96,7 @@ func parseTag(tagStr, name string, opts []string) (ok bool, optVals []string) {
 		splits := strings.Split(opt, "=")
 		if len(splits) == 2 {
 			name, val := strings.TrimSpace(splits[0]), strings.TrimSpace(splits[1])
-			if idx := indexOfOpt(name, opts); idx != -1 {
+			if idx := indexOfTagOpt(name, opts); idx != -1 {
 				optVals[idx] = val
 			}
 		}
@@ -111,7 +109,7 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 	indexes = make(map[int]*piiStruct)
 
 	defer func() {
-		if err != nil && !errors.Is(ErrUnsupportedType, err) {
+		if err != nil && !errors.Is(err, ErrUnsupportedType) && !errors.Is(err, ErrUnsupportedFieldType) {
 			err = fmt.Errorf("%w: %v", ErrInvalidTagConfiguration, err)
 		}
 	}()
@@ -132,6 +130,9 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 			v := ift.Field(i)
 			el := reflect.Indirect(elem.FieldByName(v.Name))
 			switch el.Kind() {
+			default:
+				return nil, fmt.Errorf("%w field '%v' at #%d", ErrUnsupportedFieldType, v.Name, idx)
+
 			case reflect.String:
 				if el.CanSet() {
 					tags := v.Tag.Get(tagID)
@@ -140,7 +141,7 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 					if ok, opts := parseTag(tags, tagSubjectID, tagOptsSubjectID); ok {
 						if vidx, ok := indexes[idx]; ok {
 							if vidx.subID != "" {
-								return nil, fmt.Errorf("%w: at #%d", errSubjectIDManyDefinition, idx)
+								return nil, fmt.Errorf("subjectID defined multiple time at #%d", idx)
 							} else {
 								vidx.subID = input
 							}
@@ -173,7 +174,7 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 
 		// return an error if a struct does not have subject id
 		if indexes[idx].subID == "" {
-			return nil, fmt.Errorf("%w: at #%d", errSubjectIDNotfound, idx)
+			return nil, fmt.Errorf("subjectID not found at #%d", idx)
 		}
 
 		// ignore struct if it does not have personal fields
