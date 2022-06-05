@@ -19,6 +19,3 @@ start-kms:
 test/kms: export KMS_ENDPOINT = http://localhost:$(KMS_PORT)
 test/kms:
 	gotest -race -v -cover ./kms/...
-
-test:
-	go test -race -cover ./...
