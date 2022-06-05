@@ -32,9 +32,19 @@ func (tp *spyProtector) Clear(ctx context.Context, force bool) error {
 func TestFactory(t *testing.T) {
 
 	assertProtectorCount := func(t *testing.T, f *factory, count int) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+
 		if want, got := count, len(f.reg); want != got {
 			t.Fatalf("expect Protectors count be %d, got %d", want, got)
 		}
+	}
+
+	assertCalls := func(t *testing.T, spy *spyProtector, fn string, min int) {
+		spy.mu.Lock()
+		defer spy.mu.Unlock()
+
+		spy.Calls.AssertCount(t, "Clear", 1)
 	}
 
 	ctx, cancelCtx := context.WithCancel(context.Background())
@@ -72,15 +82,14 @@ func TestFactory(t *testing.T) {
 	time.Sleep(margin)
 	time.Sleep(period)
 
-	p1.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
-	p2.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
+	assertCalls(t, p1.(*traceable).Protector.(*spyProtector), "Clear", 1)
+	assertCalls(t, p2.(*traceable).Protector.(*spyProtector), "Clear", 1)
 
 	// assert Monitor periodically clears resources
 	time.Sleep(period)
 
-	p1.(*spyProtector).Calls.AssertCount(t, "Clear", 2)
-
-	p2.(*spyProtector).Calls.AssertCount(t, "Clear", 2)
+	assertCalls(t, p1.(*traceable).Protector.(*spyProtector), "Clear", 2)
+	assertCalls(t, p2.(*traceable).Protector.(*spyProtector), "Clear", 2)
 
 	// assert sure Factory already deleted inactive Protectors from registry
 	time.Sleep(idle)
@@ -98,7 +107,7 @@ func TestFactory(t *testing.T) {
 	time.Sleep(margin)
 	time.Sleep(period)
 
-	p3.(*spyProtector).Calls.AssertCount(t, "Clear", 1)
+	assertCalls(t, p3.(*traceable).Protector.(*spyProtector), "Clear", 1)
 
 	cancelCtx()
 
