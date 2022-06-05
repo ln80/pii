@@ -1,5 +1,6 @@
 PII
 ============
+[![Coverage Status](https://coveralls.io/repos/github/ln80/pii/badge.svg?branch=setup_ci)](https://coveralls.io/github/ln80/pii?branch=setup_ci)
 
 #### A pluggable Go library protects [Personal Identifiable Information](https://en.wikipedia.org/wiki/Personal_data) at the struct field level.
 
