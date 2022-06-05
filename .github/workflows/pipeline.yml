@@ -18,7 +18,7 @@ jobs:
         image: nsmithuk/local-kms
         ports:
           - 8090:8080
-        env:
+        # env:
         # options: >-
         #   --name=kms 
         #   --health-cmd "curl http://localhost:9000/kms/health/live"
