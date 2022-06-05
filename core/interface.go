@@ -6,21 +6,12 @@ import (
 )
 
 var (
-	ErrUnsupportedKeyOperation = errors.New("unsupported key operation")
-)
-
-var (
-	ErrPersistKeyConflict  = errors.New("conflict error while persisting key(s)")
-	ErrPeristKeyFailed     = errors.New("failed to persist key(s)")
-	ErrRenableKeyFailed    = errors.New("failed to renable key(s)")
-	ErrKeyIDNotFound       = errors.New("key ID not found")
-	ErrDisableKeyFailed    = errors.New("failed to disable key")
-	ErrHardDeleteKeyFailed = errors.New("failed to hard delete key")
-)
-
-var (
-	ErrEnryptionFailed  = errors.New("failed to encrypt message")
-	ErrDecryptionFailed = errors.New("failed to decrypt message")
+	ErrPeristKeyFailure  = errors.New("failed to persist encryption key(s)")
+	ErrGetKeyFailure     = errors.New("failed to get encryption key(s)")
+	ErrRenableKeyFailure = errors.New("failed to renable encryption key(s)")
+	ErrDisableKeyFailure = errors.New("failed to disable encryption key")
+	ErrDeleteKeyFailure  = errors.New("failed to delete encryption key")
+	ErrKeyNotFound       = errors.New("encryption key not found")
 )
 
 type KeyGen func(ctx context.Context, namespace, keyID string) (string, error)
@@ -35,6 +26,27 @@ type KeyEngine interface {
 	RenableKey(ctx context.Context, namespace, keyID string) error
 
 	DeleteKey(ctx context.Context, namespace, keyID string) error
+}
+
+type KeyEngineWrapper interface {
+	KeyEngine
+	Origin() KeyEngine
+}
+
+type KeyEngineCache interface {
+	KeyEngineWrapper
+	ClearCache(ctx context.Context, namespace string, force bool) error
+}
+
+var (
+	ErrEnryptionFailure  = errors.New("failed to encrypt text")
+	ErrDecryptionFailure = errors.New("failed to decrypt text")
+)
+
+type Encrypter interface {
+	Encrypt(namespace string, key Key, plainTxt string) (cipherTxt string, err error)
+	Decrypt(namespace string, key Key, cipherTxt string) (plainTxt string, err error)
+	KeyGen() KeyGen
 }
 
 // type KeyUpdaterEngine interface {
@@ -52,19 +64,3 @@ type KeyEngine interface {
 // 	KeyEngine
 // 	ClearCache(ctx context.Context, namespace string, force bool) error
 // }
-
-type KeyEngineWrapper interface {
-	KeyEngine
-	Origin() KeyEngine
-}
-
-type KeyEngineCache interface {
-	KeyEngineWrapper
-	ClearCache(ctx context.Context, namespace string, force bool) error
-}
-
-type Encrypter interface {
-	Encrypt(key Key, plainTxt string) (cypherTxt string, err error)
-	Decrypt(key Key, cypherTxt string) (plainTxt string, err error)
-	// GenNewKey() string
-}

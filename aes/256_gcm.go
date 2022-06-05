@@ -28,53 +28,75 @@ func New256GCMEncrypter() core.Encrypter {
 	return &aes256gcm{}
 }
 
-// func (e *aes256gcm) GenNewKey() string {
-// 	return string(GetRandomBytes(AES265KeySize))
-// }
+func (e *aes256gcm) KeyGen() core.KeyGen {
+	return Key256GenFn
+}
 
-func (e *aes256gcm) Encrypt(key core.Key, plainTxt string) (string, error) {
+func prepareAdditionalData(namespace string) []byte {
+	if namespace == "" {
+		return nil
+	}
+	return append([]byte("ns:"), []byte(namespace)...)
+}
+func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt string, err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", core.ErrEnryptionFailure, err)
+		}
+	}()
+
 	block, err := aes.NewCipher([]byte(key[:]))
 	if err != nil {
-		return "", err
+		return
 	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return
 	}
 
 	nonce := GetRandomBytes(uint16(aesgcm.NonceSize()))
+	aad := prepareAdditionalData(namespace)
 
-	cipherText, err := aesgcm.Seal(nil, nonce, []byte(plainTxt), nil), nil
+	cTxt, err := aesgcm.Seal(nil, nonce, []byte(plainTxt), aad), nil
 	if err != nil {
-		return "", err
+		return
 	}
-	cipherText = append(nonce, cipherText...)
 
-	return fmt.Sprintf("%x", cipherText), nil
+	cTxt = append(nonce, cTxt...)
+
+	cipherTxt = fmt.Sprintf("%x", cTxt)
+	return
 }
 
-func (e *aes256gcm) Decrypt(key core.Key, ctxt string) (string, error) {
+func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (plainTxt string, err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", core.ErrDecryptionFailure, err)
+		}
+	}()
+
 	block, err := aes.NewCipher([]byte(key[:]))
 	if err != nil {
-		return "", err
+		return
 	}
-	cipherTxt, err := hex.DecodeString(ctxt)
+	cTxt, err := hex.DecodeString(cipherTxt)
 	if err != nil {
-		return "", err
+		return
 	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
-		return "", err
+		return
 	}
 
 	nonceSize := aesgcm.NonceSize()
+	aad := prepareAdditionalData(namespace)
 
-	plainTxt, err := aesgcm.Open(nil, cipherTxt[:nonceSize], cipherTxt[nonceSize:], nil)
+	plnTxt, err := aesgcm.Open(nil, cTxt[:nonceSize], cTxt[nonceSize:], aad)
 	if err != nil {
-		return "", err
+		return
 	}
 
-	return string(plainTxt), nil
+	return string(plnTxt), nil
 }

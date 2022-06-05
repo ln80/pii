@@ -41,8 +41,7 @@ func TestFactory(t *testing.T) {
 
 	builder := func(namespace string) Protector {
 		return &spyProtector{
-			Protector: NewProtector(namespace, func(pc *ProtectorConfig) {
-				pc.Engine = memory.NewKeyEngine()
+			Protector: NewProtector(namespace, memory.NewKeyEngine(), func(pc *ProtectorConfig) {
 				pc.CacheEnabled = true
 				pc.CacheTTL = 1
 				pc.GracefullMode = true
@@ -104,6 +103,7 @@ func TestFactory(t *testing.T) {
 	cancelCtx()
 
 	time.Sleep(margin)
+
 	// assert Protector was deleted from registry even is not IDLE
 	assertProtectorCount(t, f.(*factory), 0)
 }

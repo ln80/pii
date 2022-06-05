@@ -75,6 +75,7 @@ func (e *engine) cacheOf(namespace string) map[string]keyCache {
 	return e.cache[namespace]
 }
 
+// GetKeys implements core.KeyEngine
 func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (core.KeyMap, error) {
 	cache := e.cacheOf(namespace)
 
@@ -112,6 +113,7 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string
 	return foundKeys, nil
 }
 
+// GetOrCreateKeys implements core.KeyEngine
 func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen core.KeyGen) (core.KeyMap, error) {
 	if keyGen == nil {
 		keyGen = aes.Key256GenFn
@@ -153,7 +155,7 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 
 			newKey, err := keyGen(ctx, namespace, keyID)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", core.ErrPeristKeyFailure, err)
 			}
 			keys[keyID] = core.Key(newKey)
 
@@ -164,11 +166,12 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 	return keys, nil
 }
 
+// DisableKey implements core.KeyEngine
 func (e *engine) DisableKey(ctx context.Context, namespace, keyID string) error {
 	if e.origin != nil {
 		if err := e.origin.DisableKey(ctx, namespace, keyID); err != nil {
-			// side note no need to wrap error:
-			// origin is also an infra adapter & supposed to not propagate infra error
+			// There is no need to wrap error; origin is also an infra adapter
+			// and supposed not to propagate infra error
 			return err
 		}
 	}
@@ -180,11 +183,11 @@ func (e *engine) DisableKey(ctx context.Context, namespace, keyID string) error 
 
 	keyCache, ok := cache[keyID]
 	if !ok {
-		return fmt.Errorf("%w: for %s: %v", core.ErrDisableKeyFailed, keyID, core.ErrKeyIDNotFound)
+		return core.ErrKeyNotFound
 	}
 
 	if keyCache.State == core.StateDeleted {
-		return fmt.Errorf("%w: for %s: key already hard deleted", core.ErrDisableKeyFailed, keyID)
+		return fmt.Errorf("%w: hard deleted key", core.ErrKeyNotFound)
 	}
 
 	keyCache.State = core.StateDisabled
@@ -193,6 +196,7 @@ func (e *engine) DisableKey(ctx context.Context, namespace, keyID string) error 
 	return nil
 }
 
+// RenableKey implements core.KeyEngine
 func (e *engine) RenableKey(ctx context.Context, namespace, keyID string) error {
 	if e.origin != nil {
 		if err := e.origin.RenableKey(ctx, namespace, keyID); err != nil {
@@ -207,11 +211,11 @@ func (e *engine) RenableKey(ctx context.Context, namespace, keyID string) error 
 
 	keyCache, ok := cache[keyID]
 	if !ok {
-		return fmt.Errorf("%w: for %s: %v", core.ErrRenableKeyFailed, keyID, core.ErrKeyIDNotFound)
+		return core.ErrKeyNotFound
 	}
 
 	if keyCache.State == core.StateDeleted {
-		return fmt.Errorf("%w: for %s: key already hard deleted", core.ErrDisableKeyFailed, keyID)
+		return fmt.Errorf("%w: hard deleted key", core.ErrKeyNotFound)
 	}
 
 	keyCache.State = core.StateActive
@@ -220,6 +224,7 @@ func (e *engine) RenableKey(ctx context.Context, namespace, keyID string) error 
 	return nil
 }
 
+// DeleteKey implements core.KeyEngine
 func (e *engine) DeleteKey(ctx context.Context, namespace, keyID string) error {
 	if e.origin != nil {
 		if err := e.origin.DeleteKey(ctx, namespace, keyID); err != nil {
@@ -244,9 +249,10 @@ func (e *engine) DeleteKey(ctx context.Context, namespace, keyID string) error {
 	return nil
 }
 
+// DeleteKey implements core.KeyEngineCache
 func (e *engine) ClearCache(ctx context.Context, namespace string, force bool) error {
-	// If store is empty then engine is acting as a store aka basic key engine.
-	// Therfore silently ignore clear cache operation.
+	// if origin is empty then the engine acts as a store aka basic key engine.
+	// therefore silently ignore clear cache operation.
 	if e.origin == nil {
 		return nil
 	}
@@ -269,7 +275,7 @@ func (e *engine) ClearCache(ctx context.Context, namespace string, force bool) e
 	return nil
 }
 
-// Origin implements core.KeyRotatorEngine
+// Origin implements core.KeyEngineCache
 func (e *engine) Origin() core.KeyEngine {
 	return e.origin
 }

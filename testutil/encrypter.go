@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/ln80/pii/core"
@@ -23,24 +24,32 @@ func (e *UnstableEncrypterMock) ResetCounter() {
 }
 
 // Decrypt implements core.Encrypter
-func (e *UnstableEncrypterMock) Decrypt(key core.Key, cypherTxt string) (plainTxt string, err error) {
+func (e *UnstableEncrypterMock) Decrypt(namespace string, key core.Key, cipherTxt string) (plainTxt string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if e.counter >= e.PointOfFailure {
-		return "", ErrEncryptionMock
+		return "", fmt.Errorf("%w: %v", core.ErrDecryptionFailure, ErrEncryptionMock)
 	}
 	e.counter++
 
-	return cypherTxt[4:], nil
+	return cipherTxt[len("mock"):], nil
 }
 
 // Encrypt implements core.Encrypter
-func (e *UnstableEncrypterMock) Encrypt(key core.Key, plainTxt string) (cypherTxt string, err error) {
+func (e *UnstableEncrypterMock) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt string, err error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
 	if e.counter >= e.PointOfFailure {
-		return "", ErrEncryptionMock
+		return "", fmt.Errorf("%w: %v", core.ErrEnryptionFailure, ErrEncryptionMock)
 	}
 	e.counter++
 
 	return "mock" + plainTxt, nil
+}
+
+// KeyGen implements core.Encrypter
+func (*UnstableEncrypterMock) KeyGen() core.KeyGen {
+	return nil
 }

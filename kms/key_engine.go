@@ -2,6 +2,7 @@ package kms
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
@@ -9,7 +10,7 @@ import (
 )
 
 func encryptContext(namespace string) map[string]string {
-	return map[string]string{"namespace": namespace}
+	return map[string]string{"ns": namespace}
 }
 
 type engine struct {
@@ -22,7 +23,7 @@ type engine struct {
 
 var _ core.KeyEngineWrapper = &engine{}
 
-// var _ core.KeyRotatorEngine = &engine{}
+// var _ core.KeyEngineWrapper = &engine{}
 
 // NewKMSWrapper allows to perform Envelope encryption.
 // In this case, origin engine keys are considered "Data keys" and KMS ones are the "Masters".
@@ -40,7 +41,7 @@ func NewKMSWrapper(kmsvc ClientAPI, resolver KMSKeyResolver, origin core.KeyEngi
 		panic("invalid origin Key Engine, nil value found")
 	}
 	if resolver == nil {
-		panic("invalid KMSKey resolver, nil value found")
+		panic("invalid KMS Key resolver, nil value found")
 	}
 
 	return &engine{
@@ -63,40 +64,52 @@ func (e *engine) decryptDataKey(ctx context.Context, kmsKey string, encKey core.
 	return string(out.Plaintext), nil
 }
 
-func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (core.KeyMap, error) {
+// DeleteKey implements core.KeyEngineWrapper
+func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (keys core.KeyMap, err error) {
 	var encKeys core.KeyMap
-	encKeys, err := e.origin.GetKeys(ctx, namespace, keyIDs...)
+	encKeys, err = e.origin.GetKeys(ctx, namespace, keyIDs...)
 	if err != nil {
 		return nil, err
 	}
 
-	keys := core.NewKeyMap()
+	keys = core.NewKeyMap()
 
 	if len(encKeys) == 0 {
-		return keys, nil
+		return
 	}
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", core.ErrGetKeyFailure, err)
+		}
+	}()
 
 	encCtx := encryptContext(namespace)
 
 	for keyID, k := range encKeys {
-		kmsKey, err := e.kmsResolver.KeyOf(ctx, namespace, keyID)
+		var kmsKey, pleinTxtkey string
+		kmsKey, err = e.kmsResolver.KeyOf(ctx, namespace, keyID)
 		if err != nil {
-			return nil, err
+			return
 		}
-		pleinTxtkey, err := e.decryptDataKey(ctx, kmsKey, k, encCtx)
+		pleinTxtkey, err = e.decryptDataKey(ctx, kmsKey, k, encCtx)
 		if err != nil {
-			return nil, err
+			return
 		}
 		keys[keyID] = core.Key(pleinTxtkey)
 	}
 
-	return keys, nil
+	return
 }
 
-func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, fallbackGen core.KeyGen) (core.KeyMap, error) {
+// GetOrCreateKeys implements core.KeyEngineWrapper
+func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGenFn core.KeyGen) (keys core.KeyMap, err error) {
 	encCtx := encryptContext(namespace)
 	newKeys := make(map[string]string)
 
+	// TODO: do not fully ignore keyGen param
+	// if not nil generate a key to catch size: 16 or 32, or 64 bytes, then adapt KMS keyGen func
+	// return an error if key size is not supported by KMS
 	keyGen := func(ctx context.Context, namespace, keyID string) (string, error) {
 		kmsKey, err := e.kmsResolver.KeyOf(ctx, namespace, keyID)
 		if err != nil {
@@ -116,43 +129,47 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		return string(out.CiphertextBlob), nil
 	}
 
-	keys, err := e.origin.GetOrCreateKeys(ctx, namespace, keyIDs, keyGen)
+	keys, err = e.origin.GetOrCreateKeys(ctx, namespace, keyIDs, keyGen)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	for keyID, k := range keys {
 		if nk, ok := newKeys[keyID]; ok {
 			keys[keyID] = core.Key(nk)
 		} else {
-			kmsKey, err := e.kmsResolver.KeyOf(ctx, namespace, keyID)
+			var kmsKey, pleinTxtkey string
+			kmsKey, err = e.kmsResolver.KeyOf(ctx, namespace, keyID)
 			if err != nil {
-				return nil, err
+				return
 			}
-			pleinTxtkey, err := e.decryptDataKey(ctx, kmsKey, k, encCtx)
+			pleinTxtkey, err = e.decryptDataKey(ctx, kmsKey, k, encCtx)
 			if err != nil {
-				return nil, err
+				return
 			}
 			keys[keyID] = core.Key(pleinTxtkey)
 		}
 	}
 
-	return keys, nil
+	return
 }
 
+// DisableKey implements core.KeyEngineWrapper
 func (e *engine) DisableKey(ctx context.Context, namespace, keyID string) error {
 	return e.origin.DisableKey(ctx, namespace, keyID)
 }
 
+// RenableKey implements core.KeyEngineWrapper
 func (e *engine) RenableKey(ctx context.Context, namespace, keyID string) error {
 	return e.origin.RenableKey(ctx, namespace, keyID)
 }
 
+// DeleteKey implements core.KeyEngineWrapper
 func (e *engine) DeleteKey(ctx context.Context, namespace, keyID string) error {
 	return e.origin.DeleteKey(ctx, namespace, keyID)
 }
 
-// Origin implements core.KeyRotatorEngine
+// Origin implements core.KeyEngineWrapper
 func (e *engine) Origin() core.KeyEngine {
 	return e.origin
 }

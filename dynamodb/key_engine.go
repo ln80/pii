@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -20,9 +21,9 @@ const (
 	RangeKey = "_sk"
 
 	attrKeyID      = "_sub"
-	attrKey        = "_ckey"
-	attrDisabledAt = "_di_at"
-	attrDeletedAt  = "_de_at"
+	attrKey        = "_key"
+	attrDisabledAt = "_disabledAt"
+	attrDeletedAt  = "_deletedAt"
 	attrState      = "_state"
 )
 
@@ -31,11 +32,11 @@ type KeyItem struct {
 	RangeKey   string `dynamodbav:"_sk"`
 	Namespace  string `dynamodbav:"_nspace"`
 	KeyID      string `dynamodbav:"_sub"`
-	Key        []byte `dynamodbav:"_ckey"`
+	Key        []byte `dynamodbav:"_key"`
 	State      string `dynamodbav:"_state"`
-	CreatedAt  int64  `dynamodbav:"_cr_at"`
-	DisabledAt int64  `dynamodbav:"_di_at"`
-	DeletedAt  int64  `dynamodbav:"_de_at"`
+	CreatedAt  int64  `dynamodbav:"_createdAt"`
+	DisabledAt int64  `dynamodbav:"_disabledAt"`
+	DeletedAt  int64  `dynamodbav:"_deletedAt"`
 }
 
 type engine struct {
@@ -97,7 +98,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 
 		mk, err := attributevalue.MarshalMap(kItem)
 		if err != nil {
-			return nil, fmt.Errorf("%w: failed to marshal data", core.ErrPeristKeyFailed)
+			return nil, err
 		}
 
 		expr, err := expression.
@@ -112,7 +113,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 				),
 			).Build()
 		if err != nil {
-			return nil, fmt.Errorf("%w: failed to build query", core.ErrPeristKeyFailed)
+			return nil, err
 		}
 
 		if _, err = e.svc.PutItem(ctx, &dynamodb.PutItemInput{
@@ -123,7 +124,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			ExpressionAttributeValues: expr.Values(),
 		}); err != nil {
 			if IsConditionCheckFailure(err) {
-				// perform a second fake update with a specific condition
+				// perform a second check with a specific condition
 				// to distinguish new fresh created keys from the deleted/disabled ones
 				// update must returns the new fresh key value
 				// condition must be cost effective
@@ -131,15 +132,21 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 				continue
 			}
 
-			return nil, fmt.Errorf("%w: concerned keyID %s: %v", core.ErrPeristKeyFailed, idkey.ID(), err)
+			return nil, err
 		}
 	}
 
 	return exist, nil
 }
 
-// DeleteKey implements core.KeyUpdaterEngine
-func (e *engine) DeleteKey(ctx context.Context, namespace string, keyID string) error {
+// DeleteKey implements core.KeyEngine
+func (e *engine) DeleteKey(ctx context.Context, namespace string, keyID string) (err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", core.ErrDeleteKeyFailure, err)
+		}
+	}()
+
 	now := time.Now().UTC()
 	expr, err := expression.
 		NewBuilder().
@@ -152,20 +159,29 @@ func (e *engine) DeleteKey(ctx context.Context, namespace string, keyID string) 
 			expression.NotEqual(expression.Name(attrState), expression.Value(core.StateDeleted)),
 		).Build()
 	if err != nil {
-		return err
-	}
-	if err := e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
-		if IsConditionCheckFailure(err) {
-			return nil
-		}
-		return err
+		return
 	}
 
-	return nil
+	if err = e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
+		if IsConditionCheckFailure(err) {
+			err = nil
+		}
+		return
+	}
+
+	return
 }
 
-// DisableKey implements core.KeyUpdaterEngine
-func (e *engine) DisableKey(ctx context.Context, namespace string, keyID string) error {
+// DisableKey implements core.KeyEngine
+func (e *engine) DisableKey(ctx context.Context, namespace string, keyID string) (err error) {
+	defer func() {
+		if err != nil {
+			if !errors.Is(err, core.ErrKeyNotFound) {
+				err = fmt.Errorf("%w: %v", core.ErrDisableKeyFailure, err)
+			}
+		}
+	}()
+
 	expr, err := expression.
 		NewBuilder().
 		WithUpdate(
@@ -177,20 +193,29 @@ func (e *engine) DisableKey(ctx context.Context, namespace string, keyID string)
 			expression.NotEqual(expression.Name(attrState), expression.Value(core.StateDeleted)),
 		).Build()
 	if err != nil {
-		return err
+		return
 	}
-	if err := e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
+
+	if err = e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
 		if IsConditionCheckFailure(err) {
-			return fmt.Errorf("%w: for %s: key already hard deleted", core.ErrDisableKeyFailed, keyID)
+			err = fmt.Errorf("%w: hard deleted key", core.ErrKeyNotFound)
 		}
-		return err
+		return
 	}
 
 	return nil
 }
 
-// RenableKey implements core.KeyUpdaterEngine
-func (e *engine) RenableKey(ctx context.Context, namespace string, keyID string) error {
+// RenableKey implements core.KeyEngine
+func (e *engine) RenableKey(ctx context.Context, namespace string, keyID string) (err error) {
+	defer func() {
+		if err != nil {
+			if !errors.Is(err, core.ErrKeyNotFound) {
+				err = fmt.Errorf("%w: %v", core.ErrRenableKeyFailure, err)
+			}
+		}
+	}()
+
 	expr, err := expression.
 		NewBuilder().
 		WithUpdate(
@@ -201,24 +226,31 @@ func (e *engine) RenableKey(ctx context.Context, namespace string, keyID string)
 			expression.NotEqual(expression.Name(attrState), expression.Value(core.StateDeleted)),
 		).Build()
 	if err != nil {
-		return err
+		return
 	}
-	if err := e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
+
+	if err = e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
 		if IsConditionCheckFailure(err) {
-			return fmt.Errorf("%w: for %s: key already hard deleted", core.ErrRenableKeyFailed, keyID)
+			err = fmt.Errorf("%w: hard deleted key", core.ErrKeyNotFound)
 		}
-		return err
+		return
 	}
 
 	return nil
 }
 
-// GetKeys implements core.KeyUpdaterEngine
+// GetKeys implements core.KeyEngine
 func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (keys core.KeyMap, err error) {
 	count := len(keyIDs)
 	if count == 0 {
 		return keys, nil
 	}
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", core.ErrGetKeyFailure, err)
+		}
+	}()
 
 	keys = core.NewKeyMap()
 
@@ -278,16 +310,22 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string
 	return keys, nil
 }
 
-// GetOrCreateKeys implements core.KeyUpdaterEngine
-func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen core.KeyGen) (core.KeyMap, error) {
+// GetOrCreateKeys implements core.KeyEngine
+func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen core.KeyGen) (keys core.KeyMap, err error) {
 	if keyGen == nil {
 		keyGen = aes.Key256GenFn
 	}
 
-	keys, err := e.GetKeys(ctx, namespace, keyIDs...)
+	keys, err = e.GetKeys(ctx, namespace, keyIDs...)
 	if err != nil {
 		return nil, err
 	}
+
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("%w: %v", core.ErrPeristKeyFailure, err)
+		}
+	}()
 
 	missedKeys := []core.IDKey{}
 	for _, keyID := range keyIDs {
@@ -302,11 +340,9 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		missedKeys = append(missedKeys, core.NewIDKey(keyID, k))
 	}
 
-	// TODO fix needed:
-	// createkeys result might also contains new fresh keys (created just after the GetKeys read)
 	disabledOrDeleted, err := e.createKeys(ctx, namespace, missedKeys)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	for _, missedKey := range missedKeys {
@@ -316,31 +352,5 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		keys[missedKey.ID()] = missedKey.Key()
 	}
 
-	return keys, nil
+	return
 }
-
-// UpdateKeys implements core.KeyUpdaterEngine
-// func (e *engine) UpdateKeys(ctx context.Context, namespace string, keys []core.IDKey) error {
-// 	for _, idkey := range keys {
-// 		expr, err := expression.
-// 			NewBuilder().
-// 			WithUpdate(
-// 				expression.
-// 					Set(expression.Name(attrKey), expression.Value([]byte(idkey.Key()))),
-// 			).
-// 			WithCondition(
-// 				expression.NotEqual(expression.Name(attrState), expression.Value(core.StateDeleted)),
-// 			).Build()
-// 		if err != nil {
-// 			return err
-// 		}
-// 		if err := e.updateKeyItem(ctx, namespace, idkey.ID(), expr); err != nil {
-// 			if IsConditionCheckFailure(err) {
-// 				continue
-// 			}
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-// }

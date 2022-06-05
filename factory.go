@@ -29,9 +29,7 @@ type factory struct {
 
 func NewFactory(b BuildFunc, opts ...func(*FactoryConfig)) Factory {
 	if b == nil {
-		b = func(nspace string) Protector {
-			return NewProtector(nspace)
-		}
+		panic("invalid Protector builfer func , nil value found")
 	}
 
 	f := &factory{

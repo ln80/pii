@@ -30,6 +30,11 @@ type InvalidStruct2 struct {
 	Val2 string `pii:"subjectID"`
 }
 
+type InvalidStruct3 struct {
+	Val1 interface{} `pii:"subjectID"`
+	Val2 int         `pii:"data"`
+}
+
 type IgnoredStruct struct {
 	Val string
 }

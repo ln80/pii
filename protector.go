@@ -24,33 +24,44 @@ var (
 	packPrefix = "<pii::"
 )
 
-func isPackedPII(cypher string) bool {
-	return strings.HasPrefix(cypher, packPrefix) && len(cypher) > len(packPrefix)
+// isPackedPII checks if the given text is prefixed by a tag.
+// Internally we only pack already encrypted personal data.
+// The func serves as workaround to distinguish between encrypted and plain text PII
+func isPackedPII(cipher string) bool {
+	return strings.HasPrefix(cipher, packPrefix) && len(cipher) > len(packPrefix)
 }
 
-func packPII(cypher string) string {
-	if isPackedPII(cypher) {
-		return cypher
+func packPII(cipher string) string {
+	if isPackedPII(cipher) {
+		return cipher
 	}
-	return packPrefix + cypher
+	return packPrefix + cipher
 }
 
-func unpackPII(cypher string) string {
-	if !isPackedPII(cypher) {
+func unpackPII(cipher string) string {
+	if !isPackedPII(cipher) {
 		return ""
 	}
-	return cypher[len(packPrefix):]
+	return cipher[len(packPrefix):]
 }
 
 var (
-	ErrFailedToEncryptDecryptStructField = errors.New("failed to encrypt/decrypt struct field")
-	ErrFailedToForgetSubject             = errors.New("failed to forget subject")
-	ErrFailedToRecoverSubject            = errors.New("failed to recover subject")
-	ErrSubjectForgotten                  = errors.New("subject is likely forgotten")
+	// ErrEncryptDecryptFailure = errors.New("failed to encrypt or decrypt")
+	// ErrForgetSubjectFailure  = errors.New("failed to forget subject")
+	// ErrRecoverSubjectFailure = errors.New("failed to recover subject")
+	// ErrUnableRecoverSubject  = errors.New("unable to recover subject")
+	// ErrSubjectForgotten      = errors.New("subject is forgotten")
+
+	ErrEncryptDecryptFailure = newErr("failed to encrypt/decrypt")
+	ErrForgetSubjectFailure  = newErr("failed to forget subject")
+	ErrRecoverSubjectFailure = newErr("failed to recover subject")
+	ErrClearCacheFailure     = newErr("failed to clear cache")
+	ErrUnableRecoverSubject  = newErr("unable to recover subject")
+	ErrSubjectForgotten      = newErr("subject is forgotten")
 )
 
-// Protector presents the entry point service that encrypt, decrypt and crypto-erase
-// subject's Personal data
+// Protector presents the interface of the service that encrypt,
+// decrypt and crypto-erase subject's Personal data.
 type Protector interface {
 	Encrypt(ctx context.Context, structPts ...interface{}) error
 	Decrypt(ctx context.Context, structPts ...interface{}) error
@@ -83,13 +94,19 @@ var _ Protector = &protector{}
 // NewProtector returns a Protector service instance.
 // It requires a namespace for the service, and accepts options to overwrite the default configuration.
 //
-// Options must fulfill protector core.KeyEngine dependency. Otherwise, the function may panic.
-func NewProtector(namespace string, opts ...func(*ProtectorConfig)) Protector {
+// Options must fulfill protector the core.KeyEngine dependency. Otherwise, the function may panic.
+//
+// By default, Cache and Gracefull mode options are enabled.
+func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*ProtectorConfig)) Protector {
+	if namespace == "" {
+		namespace = "default"
+	}
+
 	p := &protector{
 		namespace: namespace,
 		ProtectorConfig: &ProtectorConfig{
-			// Engine:        memory.NewKeyEngine(),
 			Encrypter:     aes.New256GCMEncrypter(),
+			Engine:        engine,
 			CacheEnabled:  true,
 			GracefullMode: true,
 		},
@@ -128,8 +145,17 @@ func bufferToFieldFunc(buffer map[int]string) func(fieldIdx int, val string) (st
 	}
 }
 
-func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) error {
+// Encrypt implements Protector
+func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err error) {
 	defer p.markOp()
+
+	defer func() {
+		if err != nil {
+			err = ErrEncryptDecryptFailure.
+				withBase(err).
+				withNamespace(p.namespace)
+		}
+	}()
 
 	structs, err := scan(structPtrs...)
 	if err != nil {
@@ -139,7 +165,7 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 		return nil
 	}
 
-	keys, err := p.Engine.GetOrCreateKeys(ctx, p.namespace, structs.subjectIDs(), nil)
+	keys, err := p.Engine.GetOrCreateKeys(ctx, p.namespace, structs.subjectIDs(), p.Encrypter.KeyGen())
 	if err != nil {
 		return err
 	}
@@ -159,17 +185,17 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 
 			key, ok := keys[s.subjectID()]
 			if !ok {
-				err = ErrSubjectForgotten
+				err = ErrSubjectForgotten.withSubject(s.subjectID())
 				return
 			}
 			// idempotency: no need to re-encrypt field value if it's packed
-			// which implies it's already encrypted unless a corruption occurred
+			// packed implies already encrypted (unless a corruption occurred)
 			if isPackedPII(val) {
 				buffer[structIdx][fieldIdx] = val
 				return
 			}
 
-			encVal, err := p.Encrypter.Encrypt(key, val)
+			encVal, err := p.Encrypter.Encrypt(p.namespace, key, val)
 			if err != nil {
 				return
 			}
@@ -177,28 +203,36 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) erro
 			return
 		}
 
-		if err := s.replace(fn); err != nil {
-			return fmt.Errorf("%w: at #%d", err, structIdx)
+		if err = s.replace(fn); err != nil {
+			return fmt.Errorf("%w at #%d", err, structIdx)
 		}
 	}
 
 	// once all PII data are encrypted & pushed to buffer
 	// iterate a second time to replace field values for real
 	for structIdx, s := range structs {
-		if err := s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
-			return fmt.Errorf("%w: at #%d", err, structIdx)
+		if err = s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
+			err = fmt.Errorf("%w at #%d", err, structIdx)
+			return
 		}
 	}
 
-	return nil
+	return
 }
 
-func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
+// Encrypt implements Protector
+func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err error) {
 	defer p.markOp()
+
+	defer func() {
+		if err != nil {
+			err = ErrEncryptDecryptFailure.withBase(err).withNamespace(p.namespace)
+		}
+	}()
 
 	structs, err := scan(values...)
 	if err != nil {
-		return err
+		return
 	}
 
 	if len(structs) == 0 {
@@ -207,7 +241,7 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 
 	keys, err := p.Engine.GetKeys(ctx, p.namespace, structs.subjectIDs()...)
 	if err != nil {
-		return err
+		return
 	}
 
 	buffer := make(map[int]map[int]string)
@@ -221,18 +255,20 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 				newVal = val
 			}()
 
+			// in contrast to encrypt logic, no need to return an error
+			// if subject is not found, replace PII with relacement message from tag config.
 			key, ok := keys[s.subjectID()]
 			if !ok {
 				buffer[structIdx][fieldIdx] = s.replacements[fieldIdx]
 			} else {
 				// make sure not to decrypt a plain text value
-				// unpacked implies decrypted YOLO
+				// unpacked implies decrypted...YOLO
 				if !isPackedPII(val) {
 					buffer[structIdx][fieldIdx] = val
 					return
 				}
 
-				plainVal, err := p.Encrypter.Decrypt(key, unpackPII(val))
+				plainVal, err := p.Encrypter.Decrypt(p.namespace, key, unpackPII(val))
 				if err != nil {
 					return "", err
 				}
@@ -241,53 +277,85 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) error {
 
 			return
 		}
-		if err := s.replace(fn); err != nil {
-			return fmt.Errorf("%w: at #%d", err, structIdx)
+		if err = s.replace(fn); err != nil {
+			err = fmt.Errorf("%w at #%d", err, structIdx)
+			return
 		}
 	}
 
 	for structIdx, s := range structs {
-		if err := s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
-			return fmt.Errorf("%w: at #%d", err, structIdx)
+		if err = s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
+			err = fmt.Errorf("%w at #%d", err, structIdx)
+			return
 		}
 	}
 	return nil
 }
 
+// Encrypt implements Protector
 func (p *protector) Forget(ctx context.Context, subID string) (err error) {
 	defer p.markOp()
 
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: subject: %s, details: %v", ErrFailedToForgetSubject, subID, err)
+			err = ErrForgetSubjectFailure.
+				withBase(err).
+				withNamespace(p.namespace).
+				withSubject(subID)
 		}
 	}()
 
 	if p.GracefullMode {
-		return p.Engine.DisableKey(ctx, p.namespace, subID)
+		err = p.Engine.DisableKey(ctx, p.namespace, subID)
+		return
 	}
 
-	return p.Engine.DeleteKey(ctx, p.namespace, subID)
+	err = p.Engine.DeleteKey(ctx, p.namespace, subID)
+	return
 }
 
+// Encrypt implements Protector
 func (p *protector) Recover(ctx context.Context, subID string) (err error) {
 	defer p.markOp()
 
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %s, details: %v", ErrFailedToRecoverSubject, subID, err)
+			if errors.Is(err, core.ErrKeyNotFound) {
+				err = ErrUnableRecoverSubject.
+					withBase(err).
+					withNamespace(p.namespace).
+					withSubject(subID)
+			} else {
+				err = ErrRecoverSubjectFailure.
+					withBase(err).
+					withNamespace(p.namespace).
+					withSubject(subID)
+			}
+
 		}
 	}()
 
-	return p.Engine.RenableKey(ctx, p.namespace, subID)
+	err = p.Engine.RenableKey(ctx, p.namespace, subID)
+	return
 }
 
-func (p *protector) Clear(ctx context.Context, force bool) error {
+// Encrypt implements Protector
+func (p *protector) Clear(ctx context.Context, force bool) (err error) {
+	defer func() {
+		if err != nil {
+			err = ErrClearCacheFailure.
+				withBase(err).
+				withNamespace(p.namespace).
+				withSubject(p.namespace)
+		}
+	}()
+
 	if cp, ok := p.Engine.(core.KeyEngineCache); ok {
-		return cp.ClearCache(ctx, p.namespace, force)
+		err = cp.ClearCache(ctx, p.namespace, force)
+		return
 	}
 
-	return nil
+	return
 }
 
 // LastActiveAt implements Protector
