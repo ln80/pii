@@ -11,6 +11,8 @@ import (
 	"github.com/aws/smithy-go/transport/http"
 )
 
+// ClientAPI presents an interface for a sub-part of the AWS Dynamodb client service:
+// github.com/aws/aws-sdk-go-v2/service/dynamodb
 type ClientAPI interface {
 	dynamodb.QueryAPIClient
 
@@ -20,9 +22,9 @@ type ClientAPI interface {
 	DeleteItem(ctx context.Context, params *dynamodb.DeleteItemInput, optFns ...func(*dynamodb.Options)) (*dynamodb.DeleteItemOutput, error)
 }
 
-// IsConditionCheckFailure checks if the given error is an aws error that expresses a conditional failure exception.
+// isConditionCheckFailure checks if the given error is an aws error that expresses a conditional failure exception.
 // It works seamlessly in both single write and within a transaction operation.
-func IsConditionCheckFailure(err error) bool {
+func isConditionCheckFailure(err error) bool {
 	if strings.Contains(err.Error(), "ConditionalCheckFailedException") {
 		return true
 	}

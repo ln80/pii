@@ -1,16 +1,12 @@
 package pii
 
-import (
-	"errors"
-)
-
-// Error is a developer friendly error wrapper that speaks privacy language.
-// It's base error contains more technical details,
-// and it can be enriched with meta-data e.g namespace and subjectID.
+// Error is a developer-friendly error wrapper that speaks privacy language.
+// Its base error contains more technical details,
+// and it can be enriched with meta-data, e.g., namespace and subject.
 type Error struct {
-	msg, namespace, subject string
 	// Err is the base err
-	Err error
+	Err                     error
+	msg, namespace, subject string
 }
 
 func newErr(msg string) Error {
@@ -19,18 +15,14 @@ func newErr(msg string) Error {
 	}
 }
 
-func IsError(err error) (bool, *Error) {
-	terr := Error{}
-	if ok := errors.As(err, &terr); ok {
-		return true, &terr
-	}
-	return false, nil
-}
-
+// Message returns a short and primary message of the error.
+//
+// In contrast to Error() method, It doesn't include base error or meta-data in the return.
 func (e Error) Message() string {
 	return e.msg
 }
 
+// Subject returns the associated subject to the error if it exists.
 func (e Error) Subject() string {
 	if e.subject == "" {
 		if err, ok := e.Err.(Error); ok {
@@ -40,6 +32,7 @@ func (e Error) Subject() string {
 	return e.subject
 }
 
+// Namespace returns the associated namespace to the error if it exists.
 func (e Error) Namespace() string {
 	if e.namespace == "" {
 		if err, ok := e.Err.(Error); ok {
@@ -64,6 +57,7 @@ func (e Error) withBase(err error) Error {
 	return e
 }
 
+// Error implements error interface.
 func (e Error) Error() string {
 	str := "" + e.msg
 	if n := e.Namespace(); n != "" {
@@ -86,6 +80,8 @@ func (e Error) Unwrap() error {
 	return e.Err
 }
 
+// Is compares only messages of Errors to decide whether they are equal.
+// Otherwise, the wrapped error will decide.
 func (e Error) Is(err error) bool {
 	if perr, ok := err.(Error); ok {
 		return e.msg == perr.msg

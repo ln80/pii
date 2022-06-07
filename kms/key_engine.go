@@ -23,16 +23,13 @@ type engine struct {
 
 var _ core.KeyEngineWrapper = &engine{}
 
-// var _ core.KeyEngineWrapper = &engine{}
-
-// NewKMSWrapper allows to perform Envelope encryption.
-// In this case, origin engine keys are considered "Data keys" and KMS ones are the "Masters".
-// KMSWrapper will ensure rotation at the master key level. Thus, KMS keys will be associated to a limited amount of datakeys
-// which limit the capabilities of cryptanalysis based attacks.
-// Somehow using KMSWrapper on top of the original engine lighten security requirements of the later which can be a regular database
-// the same used for the rest of the application data.
-// Using a cacheWrapper on top of KMSWrapper may significantly reduce costs related to the later in exchange of
-// some risks i.e plain text data keys may be kept longer in memory.
+// NewKMSWrapper returns a core.KeyEngineWrapper.
+// It securly generates and encrypts keys' values using a KMS Master key.
+//
+// It lightens the wrapped engine's security requirements which can be built on top of a regular database.
+//
+// Using a cacheWrapper on top of KMSWrapper may significantly reduce costs related to the latter in exchange of
+// some risks i.e., plain-text data keys may be kept longer in memory.
 func NewKMSWrapper(kmsvc ClientAPI, resolver KMSKeyResolver, origin core.KeyEngine) core.KeyEngine {
 	if kmsvc == nil {
 		panic("invalid KMS client service, nil value found")

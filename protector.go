@@ -1,4 +1,4 @@
-// Package pii offers a set of tools to deal with
+// Package PII offers tools to deal with
 // Personal Identified Information in struct-field level
 package pii
 
@@ -44,38 +44,64 @@ func unpackPII(cipher string) string {
 	return cipher[len(packPrefix):]
 }
 
+// Errors returned by Protector service
 var (
-	// ErrEncryptDecryptFailure = errors.New("failed to encrypt or decrypt")
-	// ErrForgetSubjectFailure  = errors.New("failed to forget subject")
-	// ErrRecoverSubjectFailure = errors.New("failed to recover subject")
-	// ErrUnableRecoverSubject  = errors.New("unable to recover subject")
-	// ErrSubjectForgotten      = errors.New("subject is forgotten")
-
 	ErrEncryptDecryptFailure = newErr("failed to encrypt/decrypt")
 	ErrForgetSubjectFailure  = newErr("failed to forget subject")
 	ErrRecoverSubjectFailure = newErr("failed to recover subject")
 	ErrClearCacheFailure     = newErr("failed to clear cache")
-	ErrUnableRecoverSubject  = newErr("unable to recover subject")
+	ErrCannotRecoverSubject  = newErr("cannot recover subject")
 	ErrSubjectForgotten      = newErr("subject is forgotten")
 )
 
-// Protector presents the interface of the service that encrypt,
-// decrypt and crypto-erase subject's Personal data.
+// Protector presents the service's interface that encrypts, decrypts,
+// and crypto-erases subjects' Personal data.
 type Protector interface {
+
+	// Encrypt encrypts Personal data fields of the given structs pointers.
+	// It does its best to ensure atomicity in case of multiple structs pointers.
+	// It ensures idempotency and only encrypts fields once.
 	Encrypt(ctx context.Context, structPts ...interface{}) error
+
+	// Decrypt decrypts Personal data fields of the given structs pointers.
+	// It does its best to ensure in case of multiple structs pointers.
+	// It ensures idempotency and only decrypts fields once.
+	//
+	// It replaces the field value with a replacement message, defined in the tag,
+	// if the subject is forgotten. Otherwise, the field will be kept empty.
 	Decrypt(ctx context.Context, structPts ...interface{}) error
+
+	// Forget removes the associated encryption materials of the given subject,
+	// and crypto-erases its Personal data.
 	Forget(ctx context.Context, subID string) error
+
+	// Recover allows to recover encryption materials of the given subject.
+	// It will fail if the grace period was exceeded, and encryption materials were hard deleted.
 	Recover(ctx context.Context, subID string) error
+
+	// Clear clears encryption materials' cache based on cache-related configuration.
 	Clear(ctx context.Context, force bool) error
-	// LastActiveAt() time.Time
 }
 
-// ProtectorConfig presents Protector service configuration
+// ProtectorConfig presents the configuration of Protector service
 type ProtectorConfig struct {
-	Engine        core.KeyEngine
-	Encrypter     core.Encrypter
-	CacheEnabled  bool
-	CacheTTL      time.Duration
+
+	// Engine presents an implementation of core.KeyEngine.
+	// It manages encryption materials' life-cycle.
+	Engine core.KeyEngine
+
+	// Encrypter presents an implementation of core.Encrypter.
+	// It allows using a specific encryption algorithm.
+	Encrypter core.Encrypter
+
+	// CacheEnabled used to enable/disable cache.
+	CacheEnabled bool
+
+	// CacheTTL defines the cache's time to live duration.
+	CacheTTL time.Duration
+
+	// GracefullMode allows first to disable the encryption materials during a graceful period.
+	// Therefore recovery may succeed. Otherwise, encryption materials are immediately deleted.
 	GracefullMode bool
 }
 
@@ -88,11 +114,12 @@ type protector struct {
 var _ Protector = &protector{}
 
 // NewProtector returns a Protector service instance.
-// It requires a namespace for the service, and accepts options to overwrite the default configuration.
+// It requires a Key engine and accepts options to overwrite the default configuration.
 //
-// Options must fulfill protector the core.KeyEngine dependency. Otherwise, the function may panic.
+// It panics if the given engine is nil.
+// It uses a default namespace if the given namespace is empty.
 //
-// By default, Cache and Gracefull mode options are enabled.
+// By default, Cache and Gracefull mode options are enabled and 'AES 256 GCM' encrypter is used.
 func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*ProtectorConfig)) Protector {
 	if namespace == "" {
 		namespace = "default"
@@ -128,7 +155,7 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 	return p
 }
 
-// bufferToFieldFunc is a helper func used by Encrypt & Decrypt methods
+// bufferToFieldFunc is a helper function used by Encrypt & Decrypt methods
 // to ensure atomicity in case of bulk ops.
 func bufferToFieldFunc(buffer map[int]string) func(fieldIdx int, val string) (string, error) {
 	return func(fieldIdx int, val string) (string, error) {
@@ -311,7 +338,7 @@ func (p *protector) Recover(ctx context.Context, subID string) (err error) {
 	defer func() {
 		if err != nil {
 			if errors.Is(err, core.ErrKeyNotFound) {
-				err = ErrUnableRecoverSubject.
+				err = ErrCannotRecoverSubject.
 					withBase(err).
 					withNamespace(p.namespace).
 					withSubject(subID)

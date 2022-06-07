@@ -29,11 +29,22 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 	empty := []string{}
 
 	// Test GetOrCreate
+
+	// First, a create a new key and return it
+	keys, err = eng.GetOrCreateKeys(ctx, nspace, keyIDs[:1], nil)
+	if err != nil {
+		t.Fatalf("expect err be nil, got: %v", err)
+	}
+	if want, got := keyIDs[:1], keys.KeyIDs(); !KeysEqual(want, got) {
+		t.Fatalf("expect %v, %v be equals", want, got)
+	}
+
+	// Second, make sure to return an existing key while creating others.
 	keys, err = eng.GetOrCreateKeys(ctx, nspace, keyIDs, nil)
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
-	if want, got := keyIDs, keys.IDs(); !KeysEqual(want, got) {
+	if want, got := keyIDs, keys.KeyIDs(); !KeysEqual(want, got) {
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 
@@ -43,7 +54,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
-	if want, got := partial, keys.IDs(); !KeysEqual(want, got) {
+	if want, got := partial, keys.KeyIDs(); !KeysEqual(want, got) {
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 
@@ -60,7 +71,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
-	if want, got := empty, keys.IDs(); !KeysEqual(want, got) {
+	if want, got := empty, keys.KeyIDs(); !KeysEqual(want, got) {
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 
@@ -77,7 +88,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
-	if want, got := keyIDs[:1], keys.IDs(); !KeysEqual(want, got) {
+	if want, got := keyIDs[:1], keys.KeyIDs(); !KeysEqual(want, got) {
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 
@@ -93,7 +104,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
-	if want, got := empty, keys.IDs(); !KeysEqual(want, got) {
+	if want, got := empty, keys.KeyIDs(); !KeysEqual(want, got) {
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 

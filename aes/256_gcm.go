@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	AES265KeySize = 32
+	aES265KeySize = 32
 )
 
 var (
+	// Key256GenFn returns a function that generates a 32 bytes key
 	Key256GenFn core.KeyGen = func(ctx context.Context, namespace, subID string) (string, error) {
-		return string(GetRandomBytes(AES265KeySize)), nil
+		return string(getRandomBytes(aES265KeySize)), nil
 	}
 )
 
@@ -55,7 +56,7 @@ func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (ci
 		return
 	}
 
-	nonce := GetRandomBytes(uint16(aesgcm.NonceSize()))
+	nonce := getRandomBytes(uint16(aesgcm.NonceSize()))
 	aad := prepareAdditionalData(namespace)
 
 	cTxt, err := aesgcm.Seal(nil, nonce, []byte(plainTxt), aad), nil

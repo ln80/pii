@@ -43,12 +43,21 @@ type engine struct {
 var _ core.KeyEngine = &engine{}
 var _ core.KeyEngineCache = &engine{}
 
+// NewKeyEngine returns an in-memory core.KeyEngine implementation,
+// and is mainly used for tests.
 func NewKeyEngine() core.KeyEngine {
 	return &engine{
 		cache: make(map[string]map[string]keyCache),
 	}
 }
 
+// NewCacheWrapper returns an in-memory cache wrapper on top of a given core.KeyEngine.
+//
+// It requires time-to-live duration for caching purpose,
+// and it will use a default TTL duration value if the given one is Zero.
+//
+// Encryption Keys are sensitive information and should not be kept in memory for a long period.
+// However, caching may significantly reduce costs and network overhead.
 func NewCacheWrapper(origin core.KeyEngine, ttl time.Duration) core.KeyEngine {
 	if origin == nil {
 		panic("invalid origin Key Engine, nil value found")

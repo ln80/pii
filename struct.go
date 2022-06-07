@@ -15,9 +15,10 @@ var (
 	tagOptsData      = []string{"replace"}
 )
 
+// Errors related to struct PII tag configuration
 var (
 	ErrUnsupportedType         = errors.New("unsupported type must be a struct pointer")
-	ErrUnsupportedFieldType    = errors.New("unsupported field type must be 'Exported string'")
+	ErrUnsupportedFieldType    = errors.New("unsupported field type must be exported string")
 	ErrInvalidTagConfiguration = errors.New("invalid tag configuration")
 )
 
@@ -118,11 +119,11 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 		v := v
 		val := reflect.ValueOf(v)
 		if val.Kind() != reflect.Ptr {
-			return nil, ErrUnsupportedType
+			return nil, fmt.Errorf("%w at #%d", ErrUnsupportedType, idx)
 		}
 		ift := reflect.Indirect(val).Type()
 		if ift.Kind() != reflect.Struct {
-			return nil, ErrUnsupportedType
+			return nil, fmt.Errorf("%w at #%d", ErrUnsupportedType, idx)
 		}
 
 		elem := val.Elem()
@@ -131,7 +132,7 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 			el := reflect.Indirect(elem.FieldByName(v.Name))
 			switch el.Kind() {
 			default:
-				return nil, fmt.Errorf("%w field '%v' at #%d", ErrUnsupportedFieldType, v.Name, idx)
+				return nil, fmt.Errorf("%w field '%s.%s' at #%d", ErrUnsupportedFieldType, ift.String(), v.Name, idx)
 
 			case reflect.String:
 				if el.CanSet() {
@@ -180,6 +181,7 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 		// ignore struct if it does not have personal fields
 		if len(indexes[idx].fields) == 0 {
 			delete(indexes, idx)
+			continue
 		}
 
 		indexes[idx].reflectValue = elem

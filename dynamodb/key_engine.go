@@ -16,9 +16,10 @@ import (
 	"github.com/ln80/pii/core"
 )
 
+// Const
 const (
-	HashKey  = "_pk"
-	RangeKey = "_sk"
+	hashKey  = "_pk"
+	rangeKey = "_sk"
 
 	attrKeyID      = "_sub"
 	attrKey        = "_key"
@@ -27,6 +28,7 @@ const (
 	attrState      = "_state"
 )
 
+// KeyItem defines Dynamodb Key Engine table schema.
 type KeyItem struct {
 	HashKey    string `dynamodbav:"_pk"`
 	RangeKey   string `dynamodbav:"_sk"`
@@ -46,22 +48,21 @@ type engine struct {
 
 var _ core.KeyEngine = &engine{}
 
+// NewKeyEngine returns a core.KeyEngine implementation built on top of a Dynamodb table.
+//
+// It requires a non-empty value for Dynamodb client service and table name parameters. Otherwise, it will panic.
 func NewKeyEngine(svc ClientAPI, table string) core.KeyEngine {
+	if svc == nil {
+		panic("invalid Dynamodb client service, nil value found")
+	}
+	if table == "" {
+		panic("invalid dynamodb table name, emtpy value found")
+	}
+
 	eng := &engine{
 		svc:   svc,
 		table: table,
-		// KeyStoreConfig: &KeyStoreConfig{
-		// 	HardDeleteAfter: time.Hour * 24 * 7,
-		// },
 	}
-
-	// for _, opt := range opts {
-	// 	if opt == nil {
-	// 		continue
-	// 	}
-
-	// 	opt(store.KeyStoreConfig)
-	// }
 
 	return eng
 }
@@ -69,8 +70,8 @@ func NewKeyEngine(svc ClientAPI, table string) core.KeyEngine {
 func (e *engine) updateKeyItem(ctx context.Context, namespace, keyID string, expr expression.Expression) error {
 	if _, err := e.svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		Key: map[string]types.AttributeValue{
-			HashKey:  &types.AttributeValueMemberS{Value: namespace},
-			RangeKey: &types.AttributeValueMemberS{Value: keyID},
+			hashKey:  &types.AttributeValueMemberS{Value: namespace},
+			rangeKey: &types.AttributeValueMemberS{Value: keyID},
 		},
 		TableName:                 aws.String(e.table),
 		ConditionExpression:       expr.Condition(),
@@ -105,10 +106,10 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			NewBuilder().
 			WithCondition(
 				expression.AttributeNotExists(
-					expression.Name(HashKey),
+					expression.Name(hashKey),
 				).And(
 					expression.AttributeNotExists(
-						expression.Name(RangeKey),
+						expression.Name(rangeKey),
 					),
 				),
 			).Build()
@@ -123,7 +124,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			ExpressionAttributeNames:  expr.Names(),
 			ExpressionAttributeValues: expr.Values(),
 		}); err != nil {
-			if IsConditionCheckFailure(err) {
+			if isConditionCheckFailure(err) {
 				// perform a second check with a specific condition
 				// to distinguish new fresh created keys from the deleted/disabled ones
 				// update must returns the new fresh key value
@@ -163,7 +164,7 @@ func (e *engine) DeleteKey(ctx context.Context, namespace string, keyID string) 
 	}
 
 	if err = e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
-		if IsConditionCheckFailure(err) {
+		if isConditionCheckFailure(err) {
 			err = nil
 		}
 		return
@@ -197,7 +198,7 @@ func (e *engine) DisableKey(ctx context.Context, namespace string, keyID string)
 	}
 
 	if err = e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
-		if IsConditionCheckFailure(err) {
+		if isConditionCheckFailure(err) {
 			err = fmt.Errorf("%w: hard deleted key", core.ErrKeyNotFound)
 		}
 		return
@@ -230,7 +231,7 @@ func (e *engine) RenableKey(ctx context.Context, namespace string, keyID string)
 	}
 
 	if err = e.updateKeyItem(ctx, namespace, keyID, expr); err != nil {
-		if IsConditionCheckFailure(err) {
+		if isConditionCheckFailure(err) {
 			err = fmt.Errorf("%w: hard deleted key", core.ErrKeyNotFound)
 		}
 		return
@@ -263,9 +264,9 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string
 
 	b := expression.NewBuilder().
 		WithKeyCondition(
-			expression.Key(HashKey).Equal(expression.Value(namespace)).
+			expression.Key(hashKey).Equal(expression.Value(namespace)).
 				And(
-					expression.Key(RangeKey).Between(expression.Value(keyIDs[0]), expression.Value(keyIDs[len(keyIDs)-1])),
+					expression.Key(rangeKey).Between(expression.Value(keyIDs[0]), expression.Value(keyIDs[len(keyIDs)-1])),
 				),
 		).
 		WithFilter(

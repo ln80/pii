@@ -1,4 +1,4 @@
-name: PII Go Module Test & Release
+name: Test & Release
 
 on:
   push:

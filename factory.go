@@ -6,28 +6,49 @@ import (
 	"time"
 )
 
-type ClearFunc func()
+// FactoryClearFunc presents the function returned by Factory.Instance method.
+// It tells the associated Protector instance to immediately clear the cache of encryption materials.
+type FactoryClearFunc func()
 
-type BuildFunc func(namespace string) Protector
+// FactoryBuildFunc is used by the Factory service to create Perotector instance per namespace.
+type FactoryBuildFunc func(namespace string) Protector
 
+// Factory manages and maintains a registry of Protector services.
+//
+// It monitors each Protector service to track its activity
+// and regularly clears encryption materials caches.
 type Factory interface {
-	Instance(namespace string) (Protector, ClearFunc)
 
+	// Instance creates a new Protector instance for the given namespace or returns the existing one.
+	Instance(namespace string) (Protector, FactoryClearFunc)
+
+	// Monitor starts a long-running process in a separate Goroutine.
+	// It checks Protectors' activities and removes inactive ones,
+	// and clears their caches based on their cache TTL config.
 	Monitor(ctx context.Context)
 }
 
+// FactoryConfig presents the configuration of Factory service
 type FactoryConfig struct {
-	IDLE, MonitorPeriod time.Duration
+
+	// IDLE is the duration used to define whether a Protector service is inactive.
+	IDLE time.Duration
+
+	// MonitorPeriod is the frequency of the regular checks made by the monitoring process.
+	MonitorPeriod time.Duration
 }
 
 type factory struct {
 	mu      sync.RWMutex
 	reg     map[string]Protector
-	builder BuildFunc
+	builder FactoryBuildFunc
 	*FactoryConfig
 }
 
-func NewFactory(b BuildFunc, opts ...func(*FactoryConfig)) Factory {
+// NewFactory returns a thread-safe factory service instance.
+// It panics if builderFunc is nil.
+// Options params allow overwriting the default configuration.
+func NewFactory(b FactoryBuildFunc, opts ...func(*FactoryConfig)) Factory {
 	if b == nil {
 		panic("invalid Protector builfer func , nil value found")
 	}
@@ -51,23 +72,25 @@ func NewFactory(b BuildFunc, opts ...func(*FactoryConfig)) Factory {
 	return f
 }
 
-func (f *factory) Instance(namespace string) (Protector, ClearFunc) {
+// Instance implements Factory interface
+func (f *factory) Instance(namespace string) (Protector, FactoryClearFunc) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	if _, ok := f.reg[namespace]; !ok {
+		// Wraps the returned protector to track its activities
 		tp := &traceable{Protector: f.builder(namespace)}
 		f.reg[namespace] = tp
 		tp.markOp()
 	}
 
-	clearFunc := func() {
+	FactoryClearFunc := func() {
 		// Force Protector to clear cache without considering the current context.
-		// Ignore the returned error, which unlikely to occure.
+		// Ignore the returned error, which unlikely to occur.
 		_ = f.reg[namespace].Clear(context.Background(), true)
 	}
 
-	return f.reg[namespace], clearFunc
+	return f.reg[namespace], FactoryClearFunc
 }
 
 func (f *factory) clear(ctx context.Context, force bool) {
@@ -76,7 +99,6 @@ func (f *factory) clear(ctx context.Context, force bool) {
 
 	for nspace, p := range f.reg {
 		// clear protector encryption materials cache
-		// internally, Protector.Clear will check and proceed based on Protector.CacheTTL
 		_ = p.Clear(ctx, force)
 
 		// remove inactive protectors based on last activity timestamp
@@ -87,6 +109,7 @@ func (f *factory) clear(ctx context.Context, force bool) {
 	}
 }
 
+// Monitor implements Factory interface
 func (f *factory) Monitor(ctx context.Context) {
 	ticker := time.NewTicker(f.MonitorPeriod)
 	go func() {
