@@ -58,7 +58,7 @@ jobs:
       - name: Read Current Version
         if: ${{ (steps.version-changed.outputs.any_changed == 'true') && (github.event_name == 'push') }}
         run: |
-          grep 'const VERSION' version.go | sed -e 's/const VERSION Version = "\(v[^"]*\)"/PII_VERSION=\1/' >> $GITHUB_ENV
+          grep 'const VERSION' version.go | sed -e 's/const VERSION version = "\(v[^"]*\)"/PII_VERSION=\1/' >> $GITHUB_ENV
       
       - name: Release Module
         if: ${{ (steps.version-changed.outputs.any_changed == 'true') && (github.event_name == 'push') }}
