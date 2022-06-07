@@ -5,7 +5,7 @@ import (
 )
 
 func TestVersion(t *testing.T) {
-	var v Version = "v0.1.2-beta"
+	var v version = "v0.1.2-beta"
 	sv := v.Semver()
 
 	if want, got := uint64(0), sv.Major(); want != got {

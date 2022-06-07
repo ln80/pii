@@ -350,7 +350,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Forget(ctx, pf.TEST_PII_SubjectID()); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, err := ErrUnableRecoverSubject, p.Recover(ctx, pf.TEST_PII_SubjectID()); !errors.Is(err, want) {
+		if want, err := ErrCannotRecoverSubject, p.Recover(ctx, pf.TEST_PII_SubjectID()); !errors.Is(err, want) {
 			t.Fatalf("expect err be %v, got %v", want, err)
 		}
 	})
