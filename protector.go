@@ -258,7 +258,7 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err err
 		return nil
 	}
 
-	keys, err := p.Engine.GetKeys(ctx, p.namespace, structs.subjectIDs()...)
+	keys, err := p.Engine.GetKeys(ctx, p.namespace, structs.subjectIDs())
 	if err != nil {
 		return
 	}

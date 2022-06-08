@@ -62,9 +62,9 @@ func (e *engine) decryptDataKey(ctx context.Context, kmsKey string, encKey core.
 }
 
 // DeleteKey implements core.KeyEngineWrapper
-func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (keys core.KeyMap, err error) {
+func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs []string) (keys core.KeyMap, err error) {
 	var encKeys core.KeyMap
-	encKeys, err = e.origin.GetKeys(ctx, namespace, keyIDs...)
+	encKeys, err = e.origin.GetKeys(ctx, namespace, keyIDs)
 	if err != nil {
 		return nil, err
 	}

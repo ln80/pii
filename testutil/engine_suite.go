@@ -11,7 +11,7 @@ import (
 func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 	nspace := "tenant-kal34p"
 
-	keys, err := eng.GetKeys(ctx, nspace)
+	keys, err := eng.GetKeys(ctx, nspace, nil)
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
@@ -50,7 +50,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 
 	// Test get a sub set of keys
 	partial := keyIDs[1:]
-	keys, err = eng.GetKeys(ctx, nspace, partial...)
+	keys, err = eng.GetKeys(ctx, nspace, partial)
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
@@ -67,7 +67,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 		t.Fatalf("expect err be %v, got: %v", want, err)
 	}
 
-	keys, err = eng.GetKeys(ctx, nspace, keyIDs[0])
+	keys, err = eng.GetKeys(ctx, nspace, keyIDs[0:1])
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
@@ -84,7 +84,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 		t.Fatalf("expect err be %v, got: %v", want, err)
 	}
 
-	keys, err = eng.GetKeys(ctx, nspace, keyIDs[0])
+	keys, err = eng.GetKeys(ctx, nspace, keyIDs[0:1])
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
@@ -100,7 +100,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine) {
 	if want, err := nilErr, eng.DeleteKey(ctx, nspace, keyIDs[0]); !errors.Is(err, want) {
 		t.Fatalf("expect err be %v, got: %v", want, err)
 	}
-	keys, err = eng.GetKeys(ctx, nspace, keyIDs[0])
+	keys, err = eng.GetKeys(ctx, nspace, keyIDs[0:1])
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}

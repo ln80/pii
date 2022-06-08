@@ -85,7 +85,7 @@ func (e *engine) cacheOf(namespace string) map[string]keyCache {
 }
 
 // GetKeys implements core.KeyEngine
-func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (core.KeyMap, error) {
+func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs []string) (core.KeyMap, error) {
 	cache := e.cacheOf(namespace)
 
 	foundKeys := core.NewKeyMap()
@@ -109,7 +109,7 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string
 	}
 
 	if e.origin != nil {
-		keys, err := e.origin.GetKeys(ctx, namespace, missedKeys...)
+		keys, err := e.origin.GetKeys(ctx, namespace, missedKeys)
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +146,7 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		}()
 	}
 
-	keys, err := e.GetKeys(ctx, namespace, keyIDs...)
+	keys, err := e.GetKeys(ctx, namespace, keyIDs)
 	if err != nil {
 		return nil, err
 	}

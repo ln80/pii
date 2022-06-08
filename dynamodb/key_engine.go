@@ -241,7 +241,7 @@ func (e *engine) RenableKey(ctx context.Context, namespace string, keyID string)
 }
 
 // GetKeys implements core.KeyEngine
-func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs ...string) (keys core.KeyMap, err error) {
+func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs []string) (keys core.KeyMap, err error) {
 	count := len(keyIDs)
 	if count == 0 {
 		return keys, nil
@@ -317,7 +317,7 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		keyGen = aes.Key256GenFn
 	}
 
-	keys, err = e.GetKeys(ctx, namespace, keyIDs...)
+	keys, err = e.GetKeys(ctx, namespace, keyIDs)
 	if err != nil {
 		return nil, err
 	}

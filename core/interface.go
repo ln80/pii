@@ -26,7 +26,7 @@ type KeyEngine interface {
 	// It doesn't return a key if it's disabled or deleted.
 	// The total count of the result should be less or equal to keyIDs' count.
 	// The returned map of keys is indexed by keyIDs.
-	GetKeys(ctx context.Context, namespace string, keyIDs ...string) (keys KeyMap, err error)
+	GetKeys(ctx context.Context, namespace string, keyIDs []string) (keys KeyMap, err error)
 
 	// GetOrCreateKeys returns the existing keys for the given keyIDs
 	// within the given namespace and creates new ones for the fresh new keyIDs.
