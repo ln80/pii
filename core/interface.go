@@ -4,6 +4,7 @@ package core
 import (
 	"context"
 	"errors"
+	"time"
 )
 
 // Errors returned by KeyEngine implementations
@@ -18,6 +19,20 @@ var (
 
 // KeyGen presents a function used by Key engines to generate keys
 type KeyGen func(ctx context.Context, namespace, keyID string) (string, error)
+
+// KeyEngineConfig presents the basic configuration of KeyEngine
+// Implementations may extend it and add specific configuration.
+type KeyEngineConfig struct {
+	GracePeriod time.Duration
+}
+
+// NewKeyEngineConfig returns a default KeyEngineConfig
+// mainly to avoid an empty GracePeriod configuration which seems to be critical.
+func NewKeyEngineConfig() *KeyEngineConfig {
+	return &KeyEngineConfig{
+		GracePeriod: 7 * 24 * time.Hour,
+	}
+}
 
 // KeyEngine presents the service responsible for managing encryption keys.
 type KeyEngine interface {
@@ -44,6 +59,10 @@ type KeyEngine interface {
 
 	// DeleteKey deletes the associated key of the given keyID.
 	DeleteKey(ctx context.Context, namespace, keyID string) error
+
+	// DeleteUnusedKeys delete unused keys which were disabled
+	// for longer or equal to the configured grace period.
+	DeleteUnusedKeys(ctx context.Context, namespace string) error
 }
 
 // KeyEngineWrapper presents a wrapper on top of an existing Key engine.

@@ -166,6 +166,11 @@ func (e *engine) DeleteKey(ctx context.Context, namespace, keyID string) error {
 	return e.origin.DeleteKey(ctx, namespace, keyID)
 }
 
+// DeleteUnusedKeys implements core.KeyEngineWrapper
+func (e *engine) DeleteUnusedKeys(ctx context.Context, namespace string) error {
+	return e.origin.DeleteUnusedKeys(ctx, namespace)
+}
+
 // Origin implements core.KeyEngineWrapper
 func (e *engine) Origin() core.KeyEngine {
 	return e.origin

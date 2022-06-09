@@ -284,6 +284,11 @@ func (e *engine) ClearCache(ctx context.Context, namespace string, force bool) e
 	return nil
 }
 
+// DeleteUnusedKeys implements core.KeyEngine
+func (*engine) DeleteUnusedKeys(ctx context.Context, namespace string) error {
+	panic("unimplemented")
+}
+
 // Origin implements core.KeyEngineCache
 func (e *engine) Origin() core.KeyEngine {
 	return e.origin

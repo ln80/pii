@@ -1,10 +1,10 @@
 PII
 ============
-[![Coverage Status](https://coveralls.io/repos/github/ln80/pii/badge.svg?branch=setup_ci)](https://coveralls.io/github/ln80/pii?branch=setup_ci)
+[![Coverage Status](https://coveralls.io/repos/github/ln80/pii/badge.svg?branch=setup_ci)](https://coveralls.io/github/ln80/pii)
 [![GoDoc](https://godoc.org/github.com/ln80/pii?status.svg)](https://godoc.org/github.com/ln80/pii)
 ![ci status](https://github.com/ln80/pii/actions/workflows/pipeline.yml/badge.svg)
 
-#### A pluggable Go library protects [Personal Identifiable Information](https://en.wikipedia.org/wiki/Personal_data) at the struct field level.
+#### A pluggable Go library to protect [Personal Identifiable Information](https://en.wikipedia.org/wiki/Personal_data) at the struct field level.
 
 #### **TLDR; PII** simplifies encryption and [cryptographic erasure](https://en.wikipedia.org/wiki/Crypto-shredding).
 
@@ -50,7 +50,7 @@ type Person struct {
 
 `prefix` option is added to the field value to define the subject ID.
 
-`replace` option is used to replace the cryptoghic erased field value. Otherwise, the field value will remain empty.
+`replace` option is used to replace the crypto-erased field value. Otherwise, the field value will be empty.
 
 
 ### At the root level (ex: main func):
@@ -60,23 +60,23 @@ Initiate the `Factory` service:
 func main() {
     ctx := context.Background()
 
-	// builder func used by factory service to instanciate a Protector service per namespace
-	builder := func(namespace string) pii.Protector {
-
+    // builder func used by factory service to instantiate a Protector service per namespace
+    builder := func(namespace string) pii.Protector {
+        // engine handles encryption keys storage and lifecycle
         engine := memory.NewKeyEngine()
 
-		return pii.NewProtector(namespace, enigne, func(pc *pii.ProtectorConfig) {
-			pc.CacheEnabled = true
-			pc.CacheTTL = 10 * time.Minute
-			pc.GracefullMode = true
-		})
-	}
+        return pii.NewProtector(namespace, enigne, func(pc *pii.ProtectorConfig) {
+            pc.CacheEnabled = true
+            pc.CacheTTL = 10 * time.Minute
+            pc.GracefulMode = true
+        })
+    }
 
-	// Factory must be injected as dependency in the functional code (ex: HTTP handlers)
-	f := pii.NewFactory(builder)
+    // Factory must be injected as dependency in the functional code (ex: HTTP handlers)
+    f := pii.NewFactory(builder)
 
-	// In a separated Goroutine, supervise and regulary clear resources
-	f.Monitor(ctx)
+    // In a separated Goroutine, supervise and regularly clear resources
+    f.Monitor(ctx)
 }
 ```
 
@@ -87,40 +87,39 @@ func main() {
 
 ```go
 func MakeSignupHandler(f pii.Factory, store UserStore) http.HandlerFunc {
-	
-    return func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
 
-		var per Person
-		err := json.NewDecoder(r.Body).Decode(&per)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+        return func(w http.ResponseWriter, r *http.Request) {
+        ctx := r.Context()
 
-		// Get the protector service for the given namespace
-		nspace := r.Header.Get("Tenant-ID")
-		prot, clear := f.Instance(nspace)
+        var per Person
+        err := json.NewDecoder(r.Body).Decode(&per)
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+            return
+        }
+
+        // Get the protector service for the given namespace
+        nspace := r.Header.Get("Tenant-ID")
+        prot, clear := f.Instance(nspace)
         
-                // Optional, Force clearing cache of encryption materials (related to namespace)
-		defer clear()
+        // Optional, Force clearing cache of encryption materials (related to namespace)
+        defer clear()
 
-		// Encrypt Person struct which contains PII.
-		if err := prot.Encrypt(ctx, per); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+        // Encrypt Person struct which contains PII.
+        if err := prot.Encrypt(ctx, per); err != nil {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+            return
+        }
 
-		...
+        ...
 
-		if err := store.Save(ctx, per); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+        if err := store.Save(ctx, per); err != nil {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+            return
+        }
 
-		...
-		
-	}
+        ...
+    }
 }
 
 ```
@@ -137,18 +136,18 @@ Allows to `Forget` a subject's `Personal data` by first disabling, then deleting
     ...
 
     if err := prot.Forget(ctx, subjectID); err != nil {
-		return err
-	}
+        return err
+    }
 
     ...
 
     if err := prot.Recover(ctx, subjectID); err != nil {
-	    if errors.Is(err, pii.ErrCannotRecoverSubject) {
-	    	fmt.Print("Sorry it's late. Good bye forever")
-	    }
+        if errors.Is(err, pii.ErrCannotRecoverSubject) {
+            fmt.Print("Sorry it's late. Good bye forever")
+        }
 
-	    return err
-	}
+        return err
+    }
 
 ```
 Forgetting a subject means we can't decrypt nor encrypt any of its old or new `Personal data`.
@@ -167,17 +166,17 @@ You can use your own implementation for each pluggin:
 
 ```go
     b := func(namespace string) pii.Protector {
-		return pii.NewProtector(namespace, nil, func(pc *pii.ProtectorConfig) {
-			
+        return pii.NewProtector(namespace, nil, func(pc *pii.ProtectorConfig) {
+
             pc.Encrypter = MyCustomAlgorithm()
 
-			pc.Engine = MyCustomWrapper(
-				MyCustomKeyEngine(),
-			)
-		})
-	}
+            pc.Engine = MyCustomWrapper(
+                MyCustomKeyEngine(),
+            )
+        })
+    }
 
-	f := NewFactory(b)
+    f := NewFactory(b)
 ```
 
 
@@ -216,4 +215,4 @@ Please see https://pkg.go.dev/github.com/ln80/pii for detailed usage docs.
 
 ## License
 
-Distributed under MIT License
+Distributed under MIT License.

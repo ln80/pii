@@ -79,7 +79,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 	}
 	opf2 := pf2
 
-	t.Run("encrypt-decrypt personal data with nonsence values", func(t *testing.T) {
+	t.Run("encrypt-decrypt personal data with nonsense values", func(t *testing.T) {
 		if err := p.Encrypt(ctx); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
@@ -342,10 +342,10 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		// forget subject for real, and assert we are unable to recover it
 		// p2 := NewProtector(nspace, func(pc *ProtectorConfig) {
 		// 	pc.Engine = memory.NewKeyEngine()
-		// 	pc.GracefullMode = false
+		// 	pc.GracefulMode = false
 		// })
 
-		p.(*protector).GracefullMode = false
+		p.(*protector).GracefulMode = false
 
 		if err := p.Forget(ctx, pf.TEST_PII_SubjectID()); err != nil {
 			t.Fatal("expect err be nil, got", err)

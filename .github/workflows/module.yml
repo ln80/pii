@@ -1,4 +1,4 @@
-name: Test & Release
+name: Go Module
 
 on:
   push:
@@ -8,6 +8,7 @@ on:
 
 jobs:
   test-release:
+    name: Test & Release
     runs-on: ubuntu-latest
     services:
       dynamodb:
@@ -34,7 +35,7 @@ jobs:
         env:
           GOPROXY: https://proxy.golang.org,direct
   
-      - name: Run Unit & Functional tests
+      - name: Run Unit & Integ Tests
         run: |
           make ci/test
         env:

@@ -54,7 +54,7 @@ func TestFactory(t *testing.T) {
 			Protector: NewProtector(namespace, memory.NewKeyEngine(), func(pc *ProtectorConfig) {
 				pc.CacheEnabled = true
 				pc.CacheTTL = 1
-				pc.GracefullMode = true
+				pc.GracefulMode = true
 			}),
 		}
 	}

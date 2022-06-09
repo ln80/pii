@@ -100,9 +100,9 @@ type ProtectorConfig struct {
 	// CacheTTL defines the cache's time to live duration.
 	CacheTTL time.Duration
 
-	// GracefullMode allows first to disable the encryption materials during a graceful period.
+	// GracefulMode allows first to disable the encryption materials during a graceful period.
 	// Therefore recovery may succeed. Otherwise, encryption materials are immediately deleted.
-	GracefullMode bool
+	GracefulMode bool
 }
 
 type protector struct {
@@ -119,7 +119,7 @@ var _ Protector = &protector{}
 // It panics if the given engine is nil.
 // It uses a default namespace if the given namespace is empty.
 //
-// By default, Cache and Gracefull mode options are enabled and 'AES 256 GCM' encrypter is used.
+// By default, Cache and Graceful mode options are enabled and 'AES 256 GCM' encrypter is used.
 func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*ProtectorConfig)) Protector {
 	if namespace == "" {
 		namespace = "default"
@@ -128,10 +128,10 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 	p := &protector{
 		namespace: namespace,
 		ProtectorConfig: &ProtectorConfig{
-			Encrypter:     aes.New256GCMEncrypter(),
-			Engine:        engine,
-			CacheEnabled:  true,
-			GracefullMode: true,
+			Encrypter:    aes.New256GCMEncrypter(),
+			Engine:       engine,
+			CacheEnabled: true,
+			GracefulMode: true,
 		},
 	}
 
@@ -323,7 +323,7 @@ func (p *protector) Forget(ctx context.Context, subID string) (err error) {
 		}
 	}()
 
-	if p.GracefullMode {
+	if p.GracefulMode {
 		err = p.Engine.DisableKey(ctx, p.namespace, subID)
 		return
 	}

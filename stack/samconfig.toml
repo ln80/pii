@@ -1,0 +1,12 @@
+version = 0.1
+[test]
+[test.deploy]
+[test.deploy.parameters]
+stack_name = "pii-stack-test"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-1er7c9t07awga"
+s3_prefix = "pii-stack-test"
+region = "eu-west-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "AppPrefix=\"pii-stack-test\" CronSchedule=\"rate(2 hours)\" GracePeriod=\"604800\" DynamoDBBillingMode=\"PAY_PER_REQUEST\" DynamoDBReadCapacity=\"0\" DynamoDBWriteCapacity=\"0\" AlarmSNSTopic=\"\""
+image_repositories = []
