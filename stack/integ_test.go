@@ -56,8 +56,11 @@ func TestIntegration(t *testing.T) {
 		ec.GracePeriod = gracePeriod
 	})
 
+	nspace := "tnt-" + strconv.FormatInt(time.Now().Unix(), 10)
+	t.Logf("integ test namespace: %s", nspace)
+
 	testutil.KeyEngineTestSuite(t, ctx, engine, func(keto *testutil.KeyEngineTestOption) {
-		keto.Namespace = "tnt-54R"
+		keto.Namespace = nspace
 
 		keto.GracePeriod = gracePeriod
 
