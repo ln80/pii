@@ -16,7 +16,7 @@ Metadata:
     ReadmeUrl: ../README.md
     Labels: ['go', 'pii', 'gdpr', 'crypto-shredding', 'dynamodb']
     HomePageUrl: https://github.com/ln80/pii
-    SemanticVersion: 0.0.1
+    SemanticVersion: 0.0.2
     SourceCodeUrl: https://github.com/ln80/pii
 
 Parameters:
@@ -78,6 +78,9 @@ Resources:
           -
             AttributeName: _sk
             AttributeType: S
+          -
+            AttributeName: _lsik
+            AttributeType: S
         KeySchema:
           -
             AttributeName: _pk
@@ -85,6 +88,21 @@ Resources:
           -
             AttributeName: _sk
             KeyType: RANGE
+        LocalSecondaryIndexes:
+          -
+            IndexName: _lsi
+            KeySchema:
+              -
+                AttributeName: _pk
+                KeyType: HASH
+              -
+                AttributeName: _lsik
+                KeyType: RANGE
+            Projection:
+              ProjectionType: 'INCLUDE'
+              NonKeyAttributes:
+                - _key
+                - _kid
         BillingMode: !Ref DynamoDBBillingMode
         ProvisionedThroughput:
           ReadCapacityUnits: !Ref DynamoDBReadCapacity

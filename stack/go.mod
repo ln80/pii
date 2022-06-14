@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-lambda-go v1.32.0
 	github.com/aws/aws-sdk-go-v2/config v1.15.8
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.15.6
-	github.com/ln80/pii v0.1.0
+	github.com/ln80/pii v0.2.1
 )
 
 require (
@@ -30,4 +30,4 @@ require (
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 )
 
-replace github.com/ln80/pii v0.1.0 => ../
+// replace github.com/ln80/pii v0.2.1 => ../
