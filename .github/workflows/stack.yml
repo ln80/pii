@@ -1,0 +1,80 @@
+name: SAM Nested Stack
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stack/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'stack/**'
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      
+      - name: Setup Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+      
+      - uses: aws-actions/setup-sam@v1
+        with:
+          version: 1.40.1
+
+      - uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Validate SAM Template
+        working-directory: ./stack
+        run: |
+          make validate
+      
+      - name: Install Go Dependencies
+        working-directory: ./stack
+        run: |
+          go mod tidy
+
+      - name: Run Unit Tests
+        working-directory: ./stack
+        run: |
+          make unit/test
+        
+      - name: Build Stack
+        working-directory: ./stack
+        run: |
+          make build
+
+      - name: Generate Integ Test StackName
+        run: echo STACK_NAME=pii-test-$(date +%s) >> $GITHUB_ENV
+        if: ${{ github.event_name == 'push' }}
+      
+      - name: Display Integ Test StackName
+        run: echo ${{ env.STACK_NAME }}
+        if: ${{ github.event_name == 'push' }}
+
+      - name: Deploy Integ Test Stack
+        working-directory: ./stack
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          make integ/deploy
+
+      - name: Run Integ Tests
+        working-directory: ./stack
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          make integ/test
+
+      # in case of failure, make sure to manually run the cmd after debugging
+      - name: Clear Integ Tests
+        working-directory: ./stack
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          make integ/clear

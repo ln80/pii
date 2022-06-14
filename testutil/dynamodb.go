@@ -17,10 +17,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// Hash & Range keys must be equals to ones defined in dynamodb package and used for key storage
+// following keys and attributes must be equals their equivalents defined in dynamodb package
 const (
 	HashKey  string = "_pk"
 	RangeKey string = "_sk"
+	LsiKey          = "_lsik"
+)
+
+var (
+	LsiProjAttr []string = []string{"_key", "_kid"}
 )
 
 var (
@@ -88,6 +93,10 @@ func createTable(ctx context.Context, svc *dynamodb.Client, table string) error 
 				AttributeName: aws.String(RangeKey),
 				AttributeType: types.ScalarAttributeTypeS,
 			},
+			{
+				AttributeName: aws.String(LsiKey),
+				AttributeType: types.ScalarAttributeTypeS,
+			},
 		},
 		KeySchema: []types.KeySchemaElement{
 			{
@@ -101,6 +110,25 @@ func createTable(ctx context.Context, svc *dynamodb.Client, table string) error 
 		},
 		TableName:   aws.String(table),
 		BillingMode: types.BillingModePayPerRequest,
+		LocalSecondaryIndexes: []types.LocalSecondaryIndex{
+			{
+				IndexName: aws.String("_lsi"),
+				KeySchema: []types.KeySchemaElement{
+					{
+						AttributeName: aws.String(HashKey),
+						KeyType:       types.KeyTypeHash,
+					},
+					{
+						AttributeName: aws.String(LsiKey),
+						KeyType:       types.KeyTypeRange,
+					},
+				},
+				Projection: &types.Projection{
+					ProjectionType:   types.ProjectionTypeInclude,
+					NonKeyAttributes: LsiProjAttr,
+				},
+			},
+		},
 	})
 	if err != nil {
 		return err

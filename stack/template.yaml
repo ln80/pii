@@ -1,0 +1,186 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  PII Key Engine
+
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: pii-key-engine
+    Description: |
+      PII Key Engine on top of Dynamodb.
+      https://github.com/ln80/pii
+    
+    Author: Reda Laanait
+    SpdxLicenseId: MIT
+    LicenseUrl: ../LICENSE
+    ReadmeUrl: ../README.md
+    Labels: ['go', 'pii', 'gdpr', 'crypto-shredding', 'dynamodb']
+    HomePageUrl: https://github.com/ln80/pii
+    SemanticVersion: 0.0.1
+    SourceCodeUrl: https://github.com/ln80/pii
+
+Parameters:
+  AppPrefix:
+    Type: String
+    Description: |
+      A prefix is used in stack resource names (ex: myapp-pii-staging).
+    Default: ""
+  
+  ScheduleExpression:
+    Type: String
+    Description: |
+      Schedule for trigger the execution of internal jobs, mainly to check and remove unused keys.
+    Default: rate(2 hours)
+
+  GracePeriod:
+    Type: Number
+    Description: |
+      Grace period duration (in seconds) to honor before auto-delete unused keys (default: one week).
+    Default: 604800 # One week
+
+  DynamoDBBillingMode:
+    Type: String
+    Description: |
+      Enter PAY_PER_REQUEST or PROVISIONED
+    Default: PAY_PER_REQUEST
+    AllowedValues:
+      - PROVISIONED
+      - PAY_PER_REQUEST
+  DynamoDBReadCapacity:
+    Type: Number
+    Default: 0
+  DynamoDBWriteCapacity:
+    Type: Number
+    Default: 0
+  
+  AlarmSNSTopic:
+    Type: String
+    Description: |
+      SNS Topic ARN is used to notify about internal failures, mainly Cron jobs failures.
+      A Cloudwatch alarm will be configured, only if the SNS Topic param is not empty.
+    Default: ""
+
+Conditions:
+  EnableAlarm: !Not
+    - !Equals
+      - !Ref AlarmSNSTopic
+      - ''
+
+Resources:
+  KeyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+        TableName: !Sub ${AppPrefix}-key-table
+        AttributeDefinitions:
+          -
+            AttributeName: _pk
+            AttributeType: S
+          -
+            AttributeName: _sk
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: _pk
+            KeyType: HASH
+          -
+            AttributeName: _sk
+            KeyType: RANGE
+        BillingMode: !Ref DynamoDBBillingMode
+        ProvisionedThroughput:
+          ReadCapacityUnits: !Ref DynamoDBReadCapacity
+          WriteCapacityUnits: !Ref DynamoDBWriteCapacity
+        SSESpecification:
+          SSEEnabled: false
+
+  # POLICIES:
+
+  # WritePolicy:
+  #   Type: AWS::IAM::ManagedPolicy
+  #   Properties:
+  #     PolicyDocument: 
+  #       Version: 2012-10-17
+  #       Statement: 
+  #         - Effect: Allow
+  #           Action: 
+  #             - dynamodb:PutItem
+  #             - dynamodb:UpdateItem
+  #           Resource:
+  #             - !Sub 
+  #                 - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}"
+  #                 - tableName: !Ref KeyTable
+  #             - !Sub 
+  #                 - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}/index/*"
+  #                 - tableName: !Ref KeyTable
+  # ReadPolicy:
+  #   Type: AWS::IAM::ManagedPolicy
+  #   Properties:
+  #     PolicyDocument: 
+  #       Version: 2012-10-17
+  #       Statement: 
+  #         - Effect: Allow
+  #           Action:
+  #             - dynamodb:GetItem
+  #             - dynamodb:Query
+  #           Resource:
+  #             - !Sub 
+  #                 - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}"
+  #                 - tableName: !Ref KeyTable
+  #             - !Sub 
+  #                 - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}/index/*"
+  #                 - tableName: !Ref KeyTable
+
+  # LAMBDA FUNCTIONS:
+  
+  CronFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 15
+      Runtime: go1.x
+      FunctionName: !Sub ${AppPrefix}-CronFunction
+      CodeUri: cron/
+      Handler: cron
+      Events:
+        InvocationEvent:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref ScheduleExpression
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref KeyTable
+      Environment:
+          Variables:
+            DYNAMODB_TABLE: !Ref KeyTable
+            GRACE_PERIOD: !Ref GracePeriod
+
+# ALARMS:
+  CronAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Condition: EnableAlarm
+    Properties:
+      ActionsEnabled: true
+      AlarmDescription: !Sub 'Internal scheduled tasks failed'
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub ${AppPrefix}-CronFunction
+      EvaluationPeriods: 1
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Period: 30
+      Statistic: Sum
+      Threshold: 1
+      AlarmActions:
+        - !Ref AlarmSNSTopic
+
+Outputs:
+  KeyTable:
+    Description: "Key Engine Table name"
+    Value: !Ref KeyTable
+
+  # WritePolicy:
+  #   Description: "Key Engine Write Policy"
+  #   Value: !Ref WritePolicy
+
+  # ReadPolicy:
+  #   Description: "Key Engine Read Policy"
+  #   Value: !Ref ReadPolicy
