@@ -1,6 +1,6 @@
 PII
 ============
-[![Coverage Status](https://coveralls.io/repos/github/ln80/pii/badge.svg?branch=setup_ci)](https://coveralls.io/github/ln80/pii)
+[![Coverage Status](https://coveralls.io/repos/github/ln80/pii/badge.svg?branch=main)](https://coveralls.io/github/ln80/pii)
 [![GoDoc](https://godoc.org/github.com/ln80/pii?status.svg)](https://godoc.org/github.com/ln80/pii)
 ![ci status](https://github.com/ln80/pii/actions/workflows/module.yml/badge.svg)
 ![ci status](https://github.com/ln80/pii/actions/workflows/stack.yml/badge.svg)
