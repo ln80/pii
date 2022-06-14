@@ -577,9 +577,8 @@ func (e *engine) DeleteUnusedKeys(ctx context.Context, namespace string) (err er
 	expr, err := expression.NewBuilder().
 		WithKeyCondition(
 			expression.Key(hashKey).Equal(expression.Value(namespace)).And(
-				expression.Key(lsiKey).Between(
-					expression.Value("disabled@"+strconv.FormatInt(time.Now().Add(-e.GracePeriod).Unix(), 10)),
-					expression.Value("disabled@"+strconv.FormatInt(time.Now().Unix(), 10)),
+				expression.Key(lsiKey).LessThanEqual(
+					expression.Value("disabled@" + strconv.FormatInt(time.Now().Add(-e.GracePeriod).Unix(), 10)),
 				),
 			),
 		).
