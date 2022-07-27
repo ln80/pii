@@ -13,7 +13,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
-	"github.com/ln80/pii/core"
 	piidb "github.com/ln80/pii/dynamodb"
 	"github.com/ln80/pii/testutil"
 )
@@ -52,7 +51,7 @@ func TestIntegration(t *testing.T) {
 	}
 	svc := dynamodb.NewFromConfig(cfg)
 
-	engine := piidb.NewKeyEngine(svc, table, func(ec *core.KeyEngineConfig) {
+	engine := piidb.NewKeyEngine(svc, table, func(ec *piidb.KeyEngineConfig) {
 		ec.GracePeriod = gracePeriod
 	})
 
