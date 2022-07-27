@@ -7,7 +7,7 @@ import (
 type version string
 
 // VERSION is the current version of the PII Go Module.
-const VERSION version = "v0.2.1"
+const VERSION version = "v0.2.2"
 
 // Semver parses and returns semver struct.
 func (v version) Semver() *semver.Version {
