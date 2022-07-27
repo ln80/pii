@@ -131,9 +131,6 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 			v := ift.Field(i)
 			el := reflect.Indirect(elem.FieldByName(v.Name))
 			switch el.Kind() {
-			default:
-				return nil, fmt.Errorf("%w field '%s.%s' at #%d", ErrUnsupportedFieldType, ift.String(), v.Name, idx)
-
 			case reflect.String:
 				if el.CanSet() {
 					tags := v.Tag.Get(tagID)
@@ -163,6 +160,14 @@ func scan(values ...interface{}) (indexes piiMap, err error) {
 						}
 						indexes[idx].fields = append(indexes[idx].fields, v.Name)
 						indexes[idx].replacements = append(indexes[idx].replacements, opts[0])
+					}
+				}
+
+			default:
+				if el.CanSet() {
+					tags := v.Tag.Get(tagID)
+					if ok, _ := parseTag(tags, tagSubjectID, tagOptsSubjectID); ok {
+						return nil, fmt.Errorf("%w field '%s.%s' at #%d", ErrUnsupportedFieldType, ift.String(), v.Name, idx)
 					}
 				}
 			}
