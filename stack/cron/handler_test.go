@@ -1,4 +1,4 @@
-//    zaaz go+build unit
+//go:build unit
 
 package main
 
