@@ -1,4 +1,4 @@
-//go:build unit
+//    zaaz go+build unit
 
 package main
 
@@ -10,7 +10,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	piidb "github.com/ln80/pii/dynamodb"
-	piidbtest "github.com/ln80/pii/dynamodb/testutil"
+	pii_testutil "github.com/ln80/pii/testutil"
 )
 
 var _ = (func() interface{} {
@@ -34,7 +34,7 @@ func TestHandler(t *testing.T) {
 		func() tc {
 			err := errors.New("ListNamespace mock err")
 			return tc{
-				Eng: &piidbtest.EngineMock{
+				Eng: &pii_testutil.EngineMock{
 					ListNamespaceErr: err,
 				},
 				Ok:  false,
@@ -44,7 +44,7 @@ func TestHandler(t *testing.T) {
 		func() tc {
 			err := errors.New("DeleteKey mock err")
 			return tc{
-				Eng: &piidbtest.EngineMock{
+				Eng: &pii_testutil.EngineMock{
 					ListNamespaceErr: nil,
 					NamespaceList:    []string{"ns_1, ns_2"},
 					DeleteKeyErr:     err,
@@ -56,7 +56,7 @@ func TestHandler(t *testing.T) {
 		func() tc {
 			err := errors.New("DeleteKey mock err")
 			return tc{
-				Eng: &piidbtest.EngineMock{
+				Eng: &pii_testutil.EngineMock{
 					ListNamespaceErr: nil,
 					NamespaceList:    []string{}, // namespaces not found
 					DeleteKeyErr:     err,
@@ -65,7 +65,7 @@ func TestHandler(t *testing.T) {
 			}
 		}(),
 		{
-			Eng: &piidbtest.EngineMock{
+			Eng: &pii_testutil.EngineMock{
 				ListNamespaceErr: nil,
 				NamespaceList:    []string{"ns_1, ns_2"},
 				DeleteKeyErr:     nil,

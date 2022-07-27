@@ -16,21 +16,15 @@ Metadata:
     ReadmeUrl: ../README.md
     Labels: ['go', 'pii', 'gdpr', 'crypto-shredding', 'dynamodb']
     HomePageUrl: https://github.com/ln80/pii
-    SemanticVersion: 0.0.2
+    SemanticVersion: 0.0.3
     SourceCodeUrl: https://github.com/ln80/pii
 
 Parameters:
-  AppPrefix:
-    Type: String
-    Description: |
-      A prefix is used in stack resource names (ex: myapp-pii-staging).
-    Default: ""
-  
   ScheduleExpression:
     Type: String
     Description: |
       Schedule for trigger the execution of internal jobs, mainly to check and remove unused keys.
-    Default: rate(2 hours)
+    Default: rate(4 hours)
 
   GracePeriod:
     Type: Number
@@ -70,7 +64,7 @@ Resources:
   KeyTable:
     Type: AWS::DynamoDB::Table
     Properties:
-        TableName: !Sub ${AppPrefix}-key-table
+        TableName: !Sub ${AWS::StackName}-key-table
         AttributeDefinitions:
           -
             AttributeName: _pk
@@ -152,9 +146,9 @@ Resources:
   CronFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Timeout: 15
+      Timeout: 30
       Runtime: go1.x
-      FunctionName: !Sub ${AppPrefix}-CronFunction
+      FunctionName: !Sub ${AWS::StackName}-CronFunction
       CodeUri: cron/
       Handler: cron
       Events:
@@ -180,8 +174,8 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       Dimensions:
         - Name: FunctionName
-          Value: !Sub ${AppPrefix}-CronFunction
-      EvaluationPeriods: 1
+          Value: !Sub ${AWS::StackName}-CronFunction
+      EvaluationPeriods: 2
       MetricName: Errors
       Namespace: AWS/Lambda
       Period: 30
@@ -192,7 +186,7 @@ Resources:
 
 Outputs:
   KeyTable:
-    Description: "Key Engine Table name"
+    Description: "Key Engine Dynamodb Table name"
     Value: !Ref KeyTable
 
   # WritePolicy:
