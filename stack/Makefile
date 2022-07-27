@@ -13,7 +13,7 @@ export CRON_FUNC=$(STACK_NAME)-CronFunction
 export AWS_REGION=$(REGION)
 export DYNAMODB_TABLE=$(STACK_NAME)-key-table
 
-TEST_PARAMS = AppPrefix=$(STACK_NAME) GracePeriod=$(GRACE_PERIOD)
+TEST_PARAMS = GracePeriod=$(GRACE_PERIOD)
 
 stackname:
 	echo $(STACK_NAME)

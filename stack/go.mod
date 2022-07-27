@@ -6,7 +6,7 @@ require (
 	github.com/aws/aws-lambda-go v1.32.0
 	github.com/aws/aws-sdk-go-v2/config v1.15.8
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.15.6
-	github.com/ln80/pii v0.2.1
+	github.com/ln80/pii v0.2.2
 )
 
 require (

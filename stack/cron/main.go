@@ -10,7 +10,6 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/ln80/pii/core"
 	piidb "github.com/ln80/pii/dynamodb"
 )
 
@@ -42,7 +41,7 @@ func init() {
 	}
 
 	svc := dynamodb.NewFromConfig(cfg)
-	engine = piidb.NewKeyEngine(svc, table, func(ec *core.KeyEngineConfig) {
+	engine = piidb.NewKeyEngine(svc, table, func(ec *piidb.KeyEngineConfig) {
 		if gp := os.Getenv("GRACE_PERIOD"); gp != "" {
 			d, err := strconv.Atoi(gp)
 			if err != nil {
