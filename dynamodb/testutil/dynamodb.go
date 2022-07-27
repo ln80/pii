@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -34,8 +35,6 @@ var (
 	rdm    = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
-// type DynamoDBClient *dynamodb.Client
-
 func genTableName(prefix string) string {
 	now := strconv.FormatInt(time.Now().UnixNano(), 36)
 	random := strconv.FormatInt(int64(rdm.Int31()), 36)
@@ -67,7 +66,7 @@ func WithDynamoDBTable(t *testing.T, tfn func(dbsvc interface{}, table string)) 
 
 	table := genTableName("tmp-table")
 
-	if err := createTable(ctx, dbsvc, table); err != nil {
+	if err := CreateTable(ctx, dbsvc, table); err != nil {
 		t.Fatalf("failed to create test table '%s': %v", table, err)
 	}
 
@@ -82,7 +81,7 @@ func WithDynamoDBTable(t *testing.T, tfn func(dbsvc interface{}, table string)) 
 	tfn(dbsvc, table)
 }
 
-func createTable(ctx context.Context, svc *dynamodb.Client, table string) error {
+func CreateTable(ctx context.Context, svc *dynamodb.Client, table string) error {
 	_, err := svc.CreateTable(ctx, &dynamodb.CreateTableInput{
 		AttributeDefinitions: []types.AttributeDefinition{
 			{
@@ -131,6 +130,14 @@ func createTable(ctx context.Context, svc *dynamodb.Client, table string) error 
 		},
 	})
 	if err != nil {
+		var (
+			er1 *types.TableAlreadyExistsException
+			er2 *types.ResourceInUseException
+		)
+		if errors.As(err, &er1) || errors.As(err, &er2) {
+			return nil
+		}
+
 		return err
 	}
 
