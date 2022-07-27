@@ -28,8 +28,8 @@ type KeyEngineConfig struct {
 
 // NewKeyEngineConfig returns a default KeyEngineConfig
 // mainly to avoid an empty GracePeriod configuration which seems to be critical.
-func NewKeyEngineConfig() *KeyEngineConfig {
-	return &KeyEngineConfig{
+func NewKeyEngineConfig() KeyEngineConfig {
+	return KeyEngineConfig{
 		GracePeriod: 7 * 24 * time.Hour,
 	}
 }
