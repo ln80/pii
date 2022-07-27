@@ -7,8 +7,7 @@ import (
 )
 
 // traceable presents an internal Protector wrapper mainly used to trace last activity timestamp.
-//
-// It's logic may involve in the future to fulfil audits requirements.
+// It's logic may involve in the future to fulfil audits and metrics collection requirements.
 type traceable struct {
 	Protector
 

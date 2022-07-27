@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/ln80/pii/core"
-	"github.com/ln80/pii/dynamodb"
 )
 
 type EngineMock struct {
@@ -107,4 +106,4 @@ func (e *EngineMock) ListNamespace(ctx context.Context) ([]string, error) {
 	return e.NamespaceList, nil
 }
 
-var _ dynamodb.KeyEngine = &EngineMock{}
+var _ core.KeyEngine = &EngineMock{}

@@ -10,7 +10,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression v1.4.8
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.15.5
 	github.com/aws/aws-sdk-go-v2/service/kms v1.17.1
-	github.com/aws/smithy-go v1.11.2
 )
 
 require (
@@ -20,6 +19,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.11.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.16.6 // indirect
+	github.com/aws/smithy-go v1.11.2 // indirect
 )
 
 require (

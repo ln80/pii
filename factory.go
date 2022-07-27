@@ -10,8 +10,8 @@ import (
 // It tells the associated Protector instance to immediately clear the cache of encryption materials.
 type FactoryClearFunc func()
 
-// FactoryBuildFunc is used by the Factory service to create Perotector instance per namespace.
-type FactoryBuildFunc func(namespace string) Protector
+// FactoryNewFunc is used by the Factory service to create Perotector instance per namespace.
+type FactoryNewFunc func(namespace string) Protector
 
 // Factory manages and maintains a registry of Protector services.
 //
@@ -39,23 +39,23 @@ type FactoryConfig struct {
 }
 
 type factory struct {
-	mu      sync.RWMutex
-	reg     map[string]Protector
-	builder FactoryBuildFunc
+	mu           sync.RWMutex
+	reg          map[string]Protector
+	newProtector FactoryNewFunc
 	*FactoryConfig
 }
 
 // NewFactory returns a thread-safe factory service instance.
 // It panics if builderFunc is nil.
 // Options params allow overwriting the default configuration.
-func NewFactory(b FactoryBuildFunc, opts ...func(*FactoryConfig)) Factory {
-	if b == nil {
-		panic("invalid Protector builfer func , nil value found")
+func NewFactory(newProt FactoryNewFunc, opts ...func(*FactoryConfig)) Factory {
+	if newProt == nil {
+		panic("invalid new Protector func, nil value found")
 	}
 
 	f := &factory{
-		reg:     make(map[string]Protector),
-		builder: b,
+		reg:          make(map[string]Protector),
+		newProtector: newProt,
 		FactoryConfig: &FactoryConfig{
 			IDLE:          20 * time.Minute,
 			MonitorPeriod: 5 * time.Second,
@@ -79,7 +79,7 @@ func (f *factory) Instance(namespace string) (Protector, FactoryClearFunc) {
 
 	if _, ok := f.reg[namespace]; !ok {
 		// Wraps the returned protector to track its activities
-		tp := &traceable{Protector: f.builder(namespace)}
+		tp := &traceable{Protector: f.newProtector(namespace)}
 		f.reg[namespace] = tp
 		tp.markOp()
 	}

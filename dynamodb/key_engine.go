@@ -71,6 +71,10 @@ type NamespaceRegistry interface {
 	ListNamespace(ctx context.Context) ([]string, error)
 }
 
+// KeyEngineConfig is an alias to core.KeyEngineConfig type defined in the core package.
+// It may change later to extend the core one.
+type KeyEngineConfig core.KeyEngineConfig
+
 // KeyEngine extends core.KeyEngine to add NamespaceRegistry utilities
 type KeyEngine interface {
 	core.KeyEngine
@@ -81,7 +85,7 @@ type engine struct {
 	svc   ClientAPI
 	table string
 
-	*core.KeyEngineConfig
+	*KeyEngineConfig
 }
 
 var _ core.KeyEngine = &engine{}
@@ -89,7 +93,7 @@ var _ core.KeyEngine = &engine{}
 // NewKeyEngine returns a core.KeyEngine implementation built on top of a Dynamodb table.
 //
 // It requires a non-empty value for Dynamodb client service and table name parameters. Otherwise, it will panic.
-func NewKeyEngine(svc ClientAPI, table string, opts ...func(ec *core.KeyEngineConfig)) KeyEngine {
+func NewKeyEngine(svc ClientAPI, table string, opts ...func(ec *KeyEngineConfig)) KeyEngine {
 	if svc == nil {
 		panic("invalid Dynamodb client service, nil value found")
 	}
@@ -97,10 +101,11 @@ func NewKeyEngine(svc ClientAPI, table string, opts ...func(ec *core.KeyEngineCo
 		panic("invalid dynamodb table name, empty value found")
 	}
 
+	defaultCfg := KeyEngineConfig(core.NewKeyEngineConfig())
 	eng := &engine{
 		svc:             svc,
 		table:           table,
-		KeyEngineConfig: core.NewKeyEngineConfig(),
+		KeyEngineConfig: &defaultCfg,
 	}
 
 	for _, opt := range opts {

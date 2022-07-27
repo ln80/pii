@@ -61,8 +61,8 @@ Initiate the `Factory` service:
 func main() {
     ctx := context.Background()
 
-    // builder func used by factory service to instantiate a Protector service per namespace
-    builder := func(namespace string) pii.Protector {
+    // newProt func used by factory service to instantiate protector service per namespace
+    newProt := func(namespace string) pii.Protector {
         // engine handles encryption keys storage and lifecycle
         engine := memory.NewKeyEngine()
 
@@ -74,7 +74,7 @@ func main() {
     }
 
     // Factory must be injected as dependency in the functional code (ex: HTTP handlers)
-    f := pii.NewFactory(builder)
+    f := pii.NewFactory(newProt)
 
     // In a separated Goroutine, supervise and regularly clear resources
     f.Monitor(ctx)
@@ -107,7 +107,7 @@ func MakeSignupHandler(f pii.Factory, store UserStore) http.HandlerFunc {
         defer clear()
 
         // Encrypt Person struct which contains PII.
-        if err := prot.Encrypt(ctx, per); err != nil {
+        if err := prot.Encrypt(ctx, &per); err != nil {
             http.Error(w, err.Error(), http.StatusBadRequest)
             return
         }

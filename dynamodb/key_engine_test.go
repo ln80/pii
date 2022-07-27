@@ -6,13 +6,18 @@ import (
 	"time"
 
 	"github.com/ln80/pii/core"
+	db_testutil "github.com/ln80/pii/dynamodb/testutil"
 	"github.com/ln80/pii/testutil"
 )
+
+// Interface guard:
+// Make sure Engine Mock implements dynamodb extended key engine
+var _ KeyEngine = &testutil.EngineMock{}
 
 func TestKeyEngine(t *testing.T) {
 	ctx := context.Background()
 
-	testutil.WithDynamoDBTable(t, func(dbsvc interface{}, table string) {
+	db_testutil.WithDynamoDBTable(t, func(dbsvc interface{}, table string) {
 		_, ok := dbsvc.(ClientAPI)
 		if !ok {
 			t.Fatalf("expect %v implements interface", dbsvc)
@@ -32,7 +37,7 @@ func TestKeyEngine(t *testing.T) {
 			gracePeriod := 3 * time.Millisecond
 			nspace := "tnt-54R"
 
-			eng := NewKeyEngine(dbsvc.(ClientAPI), table, func(ec *core.KeyEngineConfig) {
+			eng := NewKeyEngine(dbsvc.(ClientAPI), table, func(ec *KeyEngineConfig) {
 				ec.GracePeriod = gracePeriod
 			}, nil)
 
@@ -62,7 +67,7 @@ func TestKeyEngine(t *testing.T) {
 func TestKeyEngine_createKeys(t *testing.T) {
 	ctx := context.Background()
 
-	testutil.WithDynamoDBTable(t, func(dbsvc interface{}, table string) {
+	db_testutil.WithDynamoDBTable(t, func(dbsvc interface{}, table string) {
 		eng := NewKeyEngine(dbsvc.(ClientAPI), table).(*engine)
 
 		nspace := "tenant-p1ds7"
