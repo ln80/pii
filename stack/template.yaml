@@ -16,10 +16,14 @@ Metadata:
     ReadmeUrl: ../README.md
     Labels: ['go', 'pii', 'gdpr', 'crypto-shredding', 'dynamodb']
     HomePageUrl: https://github.com/ln80/pii
-    SemanticVersion: 0.0.3
+    SemanticVersion: 0.2.0
     SourceCodeUrl: https://github.com/ln80/pii
 
 Parameters:
+  Name:
+    Type: String
+    MinLength: '3'
+  
   ScheduleExpression:
     Type: String
     Description: |
@@ -64,7 +68,7 @@ Resources:
   KeyTable:
     Type: AWS::DynamoDB::Table
     Properties:
-        TableName: !Sub ${AWS::StackName}-key-table
+        TableName: !Sub ${Name}-table
         AttributeDefinitions:
           -
             AttributeName: _pk
@@ -148,7 +152,7 @@ Resources:
     Properties:
       Timeout: 30
       Runtime: go1.x
-      FunctionName: !Sub ${AWS::StackName}-CronFunction
+      FunctionName: !Sub ${Name}-CronFunction
       CodeUri: cron/
       Handler: cron
       Events:
@@ -174,7 +178,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       Dimensions:
         - Name: FunctionName
-          Value: !Sub ${AWS::StackName}-CronFunction
+          Value: !Sub ${Name}-CronFunction
       EvaluationPeriods: 2
       MetricName: Errors
       Namespace: AWS/Lambda
@@ -188,6 +192,8 @@ Outputs:
   KeyTable:
     Description: "Key Engine Dynamodb Table name"
     Value: !Ref KeyTable
+    Export:
+      Name: !Sub ${Name}-table
 
   # WritePolicy:
   #   Description: "Key Engine Write Policy"

@@ -8,12 +8,14 @@ ifndef STACK_NAME
 override STACK_NAME = pii-stack-test
 endif
 
-export GRACE_PERIOD=1
-export CRON_FUNC=$(STACK_NAME)-CronFunction
-export AWS_REGION=$(REGION)
-export DYNAMODB_TABLE=$(STACK_NAME)-key-table
+NAME = $(STACK_NAME)
 
-TEST_PARAMS = GracePeriod=$(GRACE_PERIOD)
+export GRACE_PERIOD=1
+export CRON_FUNC=$(NAME)-CronFunction
+export AWS_REGION=$(REGION)
+export DYNAMODB_TABLE=$(NAME)-table
+
+TEST_PARAMS = Name=$(NAME) GracePeriod=$(GRACE_PERIOD)
 
 stackname:
 	echo $(STACK_NAME)
