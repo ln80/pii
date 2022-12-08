@@ -1,0 +1,20 @@
+name: Go Security Checker
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  gosec:
+    name: Inspect for security problems
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+    
+    - name: Run Gosec scanner
+        uses: securego/gosec@master
+        with:
+          args: -exclude-dir=testutil -exclude-dir=stack ./...
