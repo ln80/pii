@@ -11,10 +11,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Check out code
-      uses: actions/checkout@v2
-    
-    - name: Run Gosec scanner
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19
+
+      - name: Check out code
+        uses: actions/checkout@v3
+      
+      - name: Run Gosec scanner
         uses: securego/gosec@master
         with:
           args: -exclude-dir=testutil -exclude-dir=stack ./...
