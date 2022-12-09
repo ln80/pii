@@ -1,4 +1,4 @@
-name: Lint
+name: Go Security Checker
 on:
   push:
     branches: [main]
@@ -6,12 +6,11 @@ on:
     branches: [main]
 
 jobs:
-  lint:
-    name: Defaults & Misspelling
+  gosec:
+    name: Inspect for security problems
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Setup Go
         uses: actions/setup-go@v3
         with:
@@ -19,9 +18,8 @@ jobs:
 
       - name: Check out code
         uses: actions/checkout@v3
-
-      - name: Lint
-        uses: golangci/golangci-lint-action@v3
+      
+      - name: Run Gosec scanner
+        uses: securego/gosec@master
         with:
-          version: v1.50.0
-          args: --enable misspell
+          args: -exclude-dir=testutil -exclude-dir=stack ./...

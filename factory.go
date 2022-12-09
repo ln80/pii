@@ -113,7 +113,13 @@ func (f *factory) clear(ctx context.Context, force bool) {
 func (f *factory) Monitor(ctx context.Context) {
 	ticker := time.NewTicker(f.MonitorPeriod)
 	go func() {
-		defer f.clear(ctx, true)
+		defer func() {
+			// Use a timed-out context to ensure the original context cancellation
+			// will not prevent clearing the cache.
+			clearCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			f.clear(clearCtx, true)
+			cancel()
+		}()
 
 		for {
 			select {
