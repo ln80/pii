@@ -21,14 +21,14 @@ jobs:
           - 8090:8080
       
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: "0"
 
       - name: Setup Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.19
+          go-version: 1.22
     
       - name: Install Dependencies
         run: go mod download
@@ -49,7 +49,7 @@ jobs:
           goveralls -coverprofile=coverage.out -repotoken=${{ secrets.COVERALLS_TOKEN }}
 
       - name: Verify Version Changed
-        uses: tj-actions/changed-files@v19
+        uses: tj-actions/changed-files@v41
         if: ${{ (github.event_name == 'push') }}
         id: version-changed
         with:
@@ -57,7 +57,9 @@ jobs:
              version.go
 
       - name: Read Current Version
-        if: ${{ (steps.version-changed.outputs.any_changed == 'true') && (github.event_name == 'push') }}
+        env:
+          VERSION_CHANGED: ${{ steps.version-changed.outputs.any_changed }}
+        if: ${{ ( env.VERSION_CHANGED == 'true') && (github.event_name == 'push') }}
         run: |
           grep 'const VERSION' version.go | sed -e 's/const VERSION version = "\(v[^"]*\)"/PII_VERSION=\1/' >> $GITHUB_ENV
       

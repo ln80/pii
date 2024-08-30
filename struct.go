@@ -221,11 +221,13 @@ func (s *piiStruct) replace(fn func(rf ReplaceField, fieldIdx int, val string) (
 			switch {
 			case field.isSlice:
 				for i := 0; i < elem.Len(); i++ {
-					(&piiStruct{
+					if err := (&piiStruct{
 						subID: s.subID, // inherit parent subject ID
 						val:   reflect.Indirect(elem.Index(i)),
 						typ:   piit,
-					}).replace(fn)
+					}).replace(fn); err != nil {
+						return err
+					}
 				}
 
 			case field.isMap:
@@ -239,28 +241,34 @@ func (s *piiStruct) replace(fn func(rf ReplaceField, fieldIdx int, val string) (
 						newElem := reflect.New(mapElem.Type()).Elem()
 						newElem.Set(mapElem)
 
-						(&piiStruct{
+						if err := (&piiStruct{
 							subID: s.subID, // inherit parent subject ID
 							val:   newElem,
 							typ:   piit,
-						}).replace(fn)
+						}).replace(fn); err != nil {
+							return err
+						}
 
 						elem.SetMapIndex(k, newElem)
 						continue
 					}
 
-					(&piiStruct{
+					if err := (&piiStruct{
 						subID: s.subID,
 						val:   reflect.Indirect(elem.MapIndex(k)),
 						typ:   piit,
-					}).replace(fn)
+					}).replace(fn); err != nil {
+						return err
+					}
 				}
 			default:
-				(&piiStruct{
+				if err := (&piiStruct{
 					subID: s.subID,
 					val:   elem,
 					typ:   piit,
-				}).replace(fn)
+				}).replace(fn); err != nil {
+					return err
+				}
 			}
 		}
 	}
