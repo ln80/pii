@@ -1,9 +1,14 @@
 package testutil
 
+type Address struct {
+	Street string `pii:"data"`
+}
+
 type Profile struct {
-	UserID   string `pii:"subjectID"`
-	Fullname string `pii:"data,replace=deleted pii"`
-	Gender   string `pii:"data"`
+	UserID   string  `pii:"subjectID"`
+	Fullname string  `pii:"data,replace=deleted pii"`
+	Gender   string  `pii:"data"`
+	Address  Address `pii:"dive"`
 	Country  string
 }
 
