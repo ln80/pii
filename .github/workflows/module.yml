@@ -49,7 +49,7 @@ jobs:
           goveralls -coverprofile=coverage.out -repotoken=${{ secrets.COVERALLS_TOKEN }}
 
       - name: Verify Version Changed
-        uses: tj-actions/changed-files@v19
+        uses: tj-actions/changed-files@v41
         if: ${{ (github.event_name == 'push') }}
         id: version-changed
         with:
