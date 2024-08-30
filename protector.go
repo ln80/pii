@@ -155,20 +155,15 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 	return p
 }
 
-// bufferToFieldFunc is a helper function used by Encrypt & Decrypt methods
-// to ensure atomicity in case of bulk ops.
-func bufferToFieldFunc(buffer map[int]string) func(fieldIdx int, val string) (string, error) {
-	return func(fieldIdx int, val string) (string, error) {
-		if _, ok := buffer[fieldIdx]; !ok {
-			return val, nil
-		}
-		return buffer[fieldIdx], nil
+func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err error) {
+	if err := p.encrypt(ctx, structPtrs); err != nil {
+		return err
 	}
+
+	return nil
 }
 
-// Encrypt implements Protector
-func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err error) {
-
+func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 	defer func() {
 		if err != nil {
 			err = ErrEncryptDecryptFailure.
@@ -190,49 +185,30 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err
 		return err
 	}
 
-	// two steps process to ensure atomicity
-	buffer := make(map[int]map[int]string)
-
-	// first iteration over PII data performs a fake replacement:
-	// only to catch, encrypt and push field values to buffer
-	for structIdx, s := range structs {
-		buffer[structIdx] = make(map[int]string)
-		fn := func(fieldIdx int, val string) (newVal string, err error) {
-			// always return the current field value
-			defer func() {
-				newVal = val
-			}()
-
-			key, ok := keys[s.subjectID()]
-			if !ok {
-				err = ErrSubjectForgotten.withSubject(s.subjectID())
-				return
-			}
-			// idempotency: no need to re-encrypt field value if it's packed
-			// packed implies already encrypted (unless a corruption occurred)
-			if isPackedPII(val) {
-				buffer[structIdx][fieldIdx] = val
-				return
-			}
-
-			encVal, err := p.Encrypter.Encrypt(p.namespace, key, val)
-			if err != nil {
-				return
-			}
-			buffer[structIdx][fieldIdx] = packPII(encVal)
+	fn := func(rf ReplaceField, fieldIdx int, val string) (newVal string, err error) {
+		key, ok := keys[rf.SubjectID]
+		if !ok {
+			err = ErrSubjectForgotten.withSubject(rf.SubjectID)
+			return
+		}
+		// idempotency: no need to re-encrypt field value if it's packed
+		// packed implies already encrypted (unless a corruption occurred)
+		if isPackedPII(val) {
+			newVal = val
 			return
 		}
 
-		if err = s.replace(fn); err != nil {
-			return fmt.Errorf("%w at #%d", err, structIdx)
+		encVal, err := p.Encrypter.Encrypt(p.namespace, key, val)
+		if err != nil {
+			return
 		}
+		newVal = packPII(encVal)
+		return
 	}
 
-	// once all PII data are encrypted & pushed to buffer
-	// iterate a second time to replace field values for real
-	for structIdx, s := range structs {
-		if err = s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
-			err = fmt.Errorf("%w at #%d", err, structIdx)
+	for idx, s := range structs {
+		if err = s.replace(fn); err != nil {
+			err = fmt.Errorf("%w at #%d", err, idx)
 			return
 		}
 	}
@@ -240,9 +216,14 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err
 	return
 }
 
-// Encrypt implements Protector
 func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err error) {
+	if err := p.decrypt(ctx, values); err != nil {
+		return err
+	}
+	return nil
+}
 
+func (p *protector) decrypt(ctx context.Context, values []any) (err error) {
 	defer func() {
 		if err != nil {
 			err = ErrEncryptDecryptFailure.withBase(err).withNamespace(p.namespace)
@@ -263,52 +244,36 @@ func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err err
 		return
 	}
 
-	buffer := make(map[int]map[int]string)
-
-	for structIdx, s := range structs {
-		buffer[structIdx] = make(map[int]string)
-
-		fn := func(fieldIdx int, val string) (newVal string, err error) {
-			// always return the current field value
-			defer func() {
-				newVal = val
-			}()
-
-			// in contrast to encrypt logic, no need to return an error
-			// if subject is not found, replace PII with relacement message from tag config.
-			key, ok := keys[s.subjectID()]
-			if !ok {
-				buffer[structIdx][fieldIdx] = s.replacements[fieldIdx]
-			} else {
-				// make sure not to decrypt a plain text value
-				// unpacked implies decrypted...YOLO
-				if !isPackedPII(val) {
-					buffer[structIdx][fieldIdx] = val
-					return
-				}
-
-				plainVal, err := p.Encrypter.Decrypt(p.namespace, key, unpackPII(val))
-				if err != nil {
-					return "", err
-				}
-				buffer[structIdx][fieldIdx] = plainVal
-			}
-
+	fn := func(rf ReplaceField, fieldIdx int, val string) (newVal string, err error) {
+		key, ok := keys[rf.SubjectID]
+		if !ok {
+			newVal = rf.Replacement
+			// err = ErrSubjectForgotten.withSubject(rf.SubjectID)
 			return
 		}
+		// idempotency: no need to re-encrypt field value if it's packed
+		// packed implies already encrypted (unless a corruption occurred)
+		if !isPackedPII(val) {
+			newVal = val
+			return
+		}
+
+		newVal, err = p.Encrypter.Decrypt(p.namespace, key, unpackPII(val))
+		if err != nil {
+			return "", err
+		}
+		return
+	}
+
+	for idx, s := range structs {
+
 		if err = s.replace(fn); err != nil {
-			err = fmt.Errorf("%w at #%d", err, structIdx)
+			err = fmt.Errorf("%w at #%d", err, idx)
 			return
 		}
 	}
 
-	for structIdx, s := range structs {
-		if err = s.replace(bufferToFieldFunc(buffer[structIdx])); err != nil {
-			err = fmt.Errorf("%w at #%d", err, structIdx)
-			return
-		}
-	}
-	return nil
+	return
 }
 
 // Encrypt implements Protector

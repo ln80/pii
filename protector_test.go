@@ -3,6 +3,7 @@ package pii
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -68,6 +69,9 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		Fullname: "Idir Moore",
 		Gender:   "M",
 		Country:  "MA",
+		Address: testutil.Address{
+			Street: "56559 Von Divide",
+		},
 	}
 	opf1 := pf1
 
@@ -90,14 +94,14 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Encrypt(ctx, &ignored); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := ignored, oignored; want != got {
+		if want, got := ignored, oignored; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 
 		if err := p.Encrypt(ctx, &ignored); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := ignored, oignored; want != got {
+		if want, got := ignored, oignored; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 	})
@@ -144,7 +148,6 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		want := ErrInvalidTagConfiguration
 		for _, value := range tcs {
 			err := p.Encrypt(ctx, value)
-			t.Log("err ---->", err)
 			if !errors.Is(err, want) {
 				t.Errorf("expect err be '%v', got '%v'", want, err)
 			}
@@ -160,10 +163,13 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 
 		// assert personal data are mutated (to a cipher text)
-		if want, got := opf1.Fullname, pf1.Fullname; want == got {
+		if want, got := opf1.Fullname, pf1.Fullname; reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
-		if want, got := opf2.Fullname, pf2.Fullname; want == got {
+		if want, got := opf1.Address, pf1.Address; reflect.DeepEqual(want, got) {
+			t.Fatalf("expect %v, %v not be equals", want, got)
+		}
+		if want, got := opf2.Fullname, pf2.Fullname; reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
 
@@ -171,15 +177,21 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Decrypt(ctx, &pf1, &pf2); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := opf1.Fullname, pf1.Fullname; want != got {
+		if want, got := opf1.Fullname, pf1.Fullname; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
-		if want, got := opf2.Fullname, pf2.Fullname; want != got {
+		if want, got := opf1.Address, pf1.Address; !reflect.DeepEqual(want, got) {
+			t.Fatalf("expect %v, %v be equals", want, got)
+		}
+		if want, got := opf2.Fullname, pf2.Fullname; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 	})
 
 	t.Run("encrypt-decrypt atomicity", func(t *testing.T) {
+
+		t.Skip("skipping this test as atomicity support has been dropped by now.")
+
 		enc := &testutil.UnstableEncrypterMock{
 			PointOfFailure: 2,
 		}
@@ -209,10 +221,10 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 
 		// expect pii structs to be different from originals
-		if want, got := opf1, pf1; want != got {
+		if want, got := opf1, pf1; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
-		if want, got := opf2, pf2; want != got {
+		if want, got := opf2, pf2; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 
@@ -233,10 +245,10 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 
 		// expect none of pii structs to be decrypted back to normal
-		if want, got := opf1, pf1; want == got {
+		if want, got := opf1, pf1; reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
-		if want, got := opf2, pf2; want == got {
+		if want, got := opf2, pf2; reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
 	})
@@ -261,7 +273,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Encrypt(ctx, &pf1); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := encpf1, pf1; want != got {
+		if want, got := encpf1, pf1; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 
@@ -274,7 +286,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Decrypt(ctx, &pf1); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := decpf1, pf1; want != got {
+		if want, got := decpf1, pf1; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 	})
@@ -292,7 +304,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Encrypt(ctx, &pf); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := opf.Fullname, pf.Fullname; want == got {
+		if want, got := opf.Fullname, pf.Fullname; reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
 		if val := pf.Fullname; !isPackedPII(val) {
@@ -308,10 +320,10 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Decrypt(ctx, &pf); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := pf.TEST_PII_Replacement("Fullname"), pf.Fullname; want != got {
+		if want, got := pf.TEST_PII_Replacement("Fullname"), pf.Fullname; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
-		if want, got := pf.TEST_PII_Replacement("Gender"), pf.Gender; want != got {
+		if want, got := pf.TEST_PII_Replacement("Gender"), pf.Gender; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 
@@ -332,10 +344,10 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if err := p.Decrypt(ctx, &pf); err != nil {
 			t.Fatal("expect err be nil, got", err)
 		}
-		if want, got := pf.TEST_PII_Replacement("Fullname"), pf.Fullname; want != got {
+		if want, got := pf.TEST_PII_Replacement("Fullname"), pf.Fullname; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
-		if want, got := pf.TEST_PII_Replacement("Gender"), pf.Gender; want != got {
+		if want, got := pf.TEST_PII_Replacement("Gender"), pf.Gender; !reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v be equals", want, got)
 		}
 
