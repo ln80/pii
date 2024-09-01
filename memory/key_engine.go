@@ -34,8 +34,7 @@ type engine struct {
 	origin core.KeyEngine
 
 	cache map[string]map[string]keyCache
-
-	mu sync.RWMutex
+	mu    sync.RWMutex
 
 	ttl time.Duration
 }
@@ -164,7 +163,7 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 
 			newKey, err := keyGen(ctx, namespace, keyID)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %v", core.ErrPeristKeyFailure, err)
+				return nil, fmt.Errorf("%w: %v", core.ErrPersistKeyFailure, err)
 			}
 			keys[keyID] = core.Key(newKey)
 

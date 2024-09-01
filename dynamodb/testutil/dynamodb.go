@@ -76,6 +76,7 @@ func WithDynamoDBTable(t *testing.T, tfn func(dbsvc interface{}, table string)) 
 		if err := deleteTable(ctx, dbsvc, table); err != nil {
 			t.Fatalf("failed to remove test table '%s': %v", table, err)
 		}
+		t.Log("dynamodb test table deleted:", table)
 	}()
 
 	tfn(dbsvc, table)
@@ -123,9 +124,12 @@ func CreateTable(ctx context.Context, svc *dynamodb.Client, table string) error 
 					},
 				},
 				Projection: &types.Projection{
-					ProjectionType:   types.ProjectionTypeInclude,
-					NonKeyAttributes: LsiProjAttr,
+					ProjectionType: types.ProjectionTypeAll,
 				},
+				// Projection: &types.Projection{
+				// 	ProjectionType:   types.ProjectionTypeInclude,
+				// 	NonKeyAttributes: LsiProjAttr,
+				// },
 			},
 		},
 	})

@@ -61,7 +61,7 @@ type Protector interface {
 	// Encrypt encrypts Personal data fields of the given structs pointers.
 	// It does its best to ensure atomicity in case of multiple structs pointers.
 	// It ensures idempotency and only encrypts fields once.
-	Encrypt(ctx context.Context, structPts ...interface{}) error
+	Encrypt(ctx context.Context, structPts ...any) error
 
 	// Decrypt decrypts Personal data fields of the given structs pointers.
 	// It does its best to ensure in case of multiple structs pointers.
@@ -69,18 +69,21 @@ type Protector interface {
 	//
 	// It replaces the field value with a replacement message, defined in the tag,
 	// if the subject is forgotten. Otherwise, the field will be kept empty.
-	Decrypt(ctx context.Context, structPts ...interface{}) error
+	Decrypt(ctx context.Context, structPts ...any) error
 
 	// Forget removes the associated encryption materials of the given subject,
 	// and crypto-erases its Personal data.
 	Forget(ctx context.Context, subID string) error
 
 	// Recover allows to recover encryption materials of the given subject.
-	// It will fail if the grace period was exceeded, and encryption materials were hard deleted.
+	//
+	// It fails if the grace period was exceeded, and encryption materials were hard deleted.
 	Recover(ctx context.Context, subID string) error
 
 	// Clear clears encryption materials' cache based on cache-related configuration.
 	Clear(ctx context.Context, force bool) error
+
+	core.TokenEngine
 }
 
 // ProtectorConfig presents the configuration of Protector service
@@ -103,6 +106,9 @@ type ProtectorConfig struct {
 	// GracefulMode allows first to disable the encryption materials during a graceful period.
 	// Therefore recovery may succeed. Otherwise, encryption materials are immediately deleted.
 	GracefulMode bool
+
+	// TokenEngine is an implementation of core.TokenEngine
+	TokenEngine core.TokenEngine
 }
 
 type protector struct {
@@ -155,7 +161,7 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 	return p
 }
 
-func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err error) {
+func (p *protector) Encrypt(ctx context.Context, structPtrs ...any) (err error) {
 	if err := p.encrypt(ctx, structPtrs); err != nil {
 		return err
 	}
@@ -216,7 +222,7 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 	return
 }
 
-func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err error) {
+func (p *protector) Decrypt(ctx context.Context, values ...any) (err error) {
 	if err := p.decrypt(ctx, values); err != nil {
 		return err
 	}
@@ -338,4 +344,27 @@ func (p *protector) Clear(ctx context.Context, force bool) (err error) {
 	}
 
 	return
+}
+
+// Detokenize implements Protector.
+func (p *protector) Detokenize(ctx context.Context, namespace string, tokens []string) (core.TokenValueMap, error) {
+	if p.TokenEngine == nil {
+		panic("unsupported action. token engine not found")
+	}
+	return p.TokenEngine.Detokenize(ctx, namespace, tokens)
+}
+
+// Tokenize implements Protector.
+func (p *protector) Tokenize(ctx context.Context, namespace string, values []core.TokenData, opts ...func(*core.TokenizeConfig)) (core.ValueTokenMap, error) {
+	if p.TokenEngine == nil {
+		panic("unsupported action. token engine not found")
+	}
+	return p.TokenEngine.Tokenize(ctx, namespace, values)
+}
+
+func (p *protector) DeleteToken(ctx context.Context, namespace string, token string) error {
+	if p.TokenEngine == nil {
+		panic("unsupported action. token engine not found")
+	}
+	return p.TokenEngine.DeleteToken(ctx, namespace, token)
 }
