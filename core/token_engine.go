@@ -15,23 +15,8 @@ var (
 	ErrDeleteTokenFailure   = errors.New("failed to delete token")
 )
 
-type TokenDataRedactFunc func(data TokenData) string
-
-var (
-	DefaultTokenDataRedactFunc TokenDataRedactFunc = func(data TokenData) string {
-		return "TOKEN-DATA-*****"
-	}
-)
-
 // TokenData presents a sensitive data that should tokenized.
 type TokenData string
-
-func (td TokenData) String() string {
-	if DefaultTokenDataRedactFunc != nil {
-		return DefaultTokenDataRedactFunc(td)
-	}
-	return string(td)
-}
 
 // ValueTokenMap maps token data to tokens
 type ValueTokenMap map[TokenData]TokenRecord
