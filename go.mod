@@ -10,6 +10,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/dynamodb/expression v1.4.8
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.15.5
 	github.com/aws/aws-sdk-go-v2/service/kms v1.17.1
+	github.com/google/uuid v1.6.0
+	github.com/mitchellh/copystructure v1.2.0
 )
 
 require (
@@ -20,8 +22,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.11.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.16.6 // indirect
 	github.com/aws/smithy-go v1.11.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
-	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 )
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -178,20 +179,35 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 		}
 	}()
 
-	structs, err := scan(structPtrs...)
-	if err != nil {
-		return err
+	structs := make([]piiStruct, 0)
+	subjectIDs := make([]string, 0)
+	for _, strPtr := range structPtrs {
+		strPtr := strPtr
+		piiStruct, err := scan(strPtr, func(sc *scanConfig) {
+			sc.requireSubject = true
+		})
+		if err != nil {
+			return err
+		}
+
+		if piiStruct.typ.hasPII {
+			structs = append(structs, piiStruct)
+			subjectIDs = append(subjectIDs, piiStruct.subjectID())
+		}
 	}
 	if len(structs) == 0 {
 		return nil
 	}
 
-	keys, err := p.Engine.GetOrCreateKeys(ctx, p.namespace, structs.subjectIDs(), p.Encrypter.KeyGen())
+	slices.Sort(subjectIDs)
+	subjectIDs = slices.Compact(subjectIDs)
+
+	keys, err := p.Engine.GetOrCreateKeys(ctx, p.namespace, subjectIDs, p.Encrypter.KeyGen())
 	if err != nil {
 		return err
 	}
 
-	fn := func(rf ReplaceField, fieldIdx int, val string) (newVal string, err error) {
+	fn := func(rf ReplaceField, val string) (newVal string, err error) {
 		key, ok := keys[rf.SubjectID]
 		if !ok {
 			err = ErrSubjectForgotten.withSubject(rf.SubjectID)
@@ -218,7 +234,6 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 			return
 		}
 	}
-
 	return
 }
 
@@ -229,32 +244,44 @@ func (p *protector) Decrypt(ctx context.Context, values ...any) (err error) {
 	return nil
 }
 
-func (p *protector) decrypt(ctx context.Context, values []any) (err error) {
+func (p *protector) decrypt(ctx context.Context, structPtrs []any) (err error) {
 	defer func() {
 		if err != nil {
 			err = ErrEncryptDecryptFailure.withBase(err).withNamespace(p.namespace)
 		}
 	}()
 
-	structs, err := scan(values...)
-	if err != nil {
-		return
+	structs := make([]piiStruct, 0)
+	subjectIDs := make([]string, 0)
+	for _, strPtr := range structPtrs {
+		strPtr := strPtr
+		piiStruct, err := scan(strPtr, func(sc *scanConfig) {
+			sc.requireSubject = true
+		})
+		if err != nil {
+			return err
+		}
+		if piiStruct.typ.hasPII {
+			structs = append(structs, piiStruct)
+			subjectIDs = append(subjectIDs, piiStruct.subID)
+		}
 	}
-
 	if len(structs) == 0 {
 		return nil
 	}
 
-	keys, err := p.Engine.GetKeys(ctx, p.namespace, structs.subjectIDs())
+	slices.Sort(subjectIDs)
+	subjectIDs = slices.Compact(subjectIDs)
+
+	keys, err := p.Engine.GetKeys(ctx, p.namespace, subjectIDs)
 	if err != nil {
 		return
 	}
 
-	fn := func(rf ReplaceField, fieldIdx int, val string) (newVal string, err error) {
+	fn := func(rf ReplaceField, val string) (newVal string, err error) {
 		key, ok := keys[rf.SubjectID]
 		if !ok {
 			newVal = rf.Replacement
-			// err = ErrSubjectForgotten.withSubject(rf.SubjectID)
 			return
 		}
 		// idempotency: no need to re-encrypt field value if it's packed

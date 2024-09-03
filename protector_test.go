@@ -367,3 +367,39 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 	})
 }
+
+func BenchmarkProtector(b *testing.B) {
+	nspace := "tenant-d195kla"
+
+	ctx := context.Background()
+
+	p := NewProtector(nspace, memory.NewKeyEngine())
+
+	b.Run("encrypt decrypt", func(b *testing.B) {
+		b.ResetTimer()
+
+		for i := 0; i < b.N; i++ {
+			pfs := []any{
+				&testutil.Profile{
+					UserID:   "xal5430",
+					Fullname: "Idir Moore",
+					Gender:   "M",
+					Country:  "MA",
+				},
+				&testutil.Profile{
+					UserID:   "kal5430",
+					Fullname: "Idir Moore",
+					Gender:   "M",
+					Country:  "MA",
+				},
+			}
+			err := p.Encrypt(ctx, pfs...)
+			if err != nil {
+				b.Fatal("expect err be nil, got", err)
+			}
+			if err := p.Decrypt(ctx, pfs...); err != nil {
+				b.Fatal("expect err be nil, got", err)
+			}
+		}
+	})
+}

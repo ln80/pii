@@ -13,19 +13,94 @@ var (
 	tagSubjectID = "subjectID"
 	tagData      = "data"
 	tagDive      = "dive"
-	// tagOptsSubjectID = []string{"prefix"}
-	// tagOptsData      = []string{"replace"}
 )
 
-// Errors related to struct PII tag configuration
 var (
 	ErrInvalidTagConfiguration = errors.New("invalid tag configuration")
-
-	ErrUnsupportedType         = errors.New("unsupported type must be a struct pointer")
+	ErrUnsupportedType         = errors.New("unsupported type")
 	ErrUnsupportedFieldType    = errors.New("unsupported field type must be convertible to string")
 	ErrMultipleNestedSubjectID = errors.New("potential multiple nested subject IDs")
 	ErrSubjectIDNotFound       = errors.New("subject ID not found")
+	ErrRedactFuncNotFound      = errors.New("redact function not found")
 )
+
+// Check if a struct value contains PII.
+//
+// It fails if "pii" tag is misconfigured or value is not a struct or pointer to struct.
+func Check(v any) (bool, error) {
+	t := reflect.TypeOf(v)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return false, fmt.Errorf("%w : %v", ErrUnsupportedType, t)
+	}
+
+	piiStructType, err := scanStructType(t)
+	if err != nil {
+		return false, err
+	}
+
+	return piiStructType.hasPII, nil
+}
+
+type RedactConfig struct {
+	RedactFunc ReplaceFunc
+}
+
+// Redact does redact PII data from the struct field values.
+//
+// It fails if 'structPtr' is not a struct pointer, the pii tag is misconfigured,
+// or the redact function is nil.
+//
+// Optionally, it accepts overriding the default redact function.
+func Redact(structPtr any, opts ...func(*RedactConfig)) error {
+	cfg := RedactConfig{
+		RedactFunc: defaultRedactFunc,
+	}
+	for _, opt := range opts {
+		if opt == nil {
+			continue
+		}
+		opt(&cfg)
+	}
+	if cfg.RedactFunc == nil {
+		return ErrRedactFuncNotFound
+	}
+
+	piiStruct, err := scan(structPtr)
+	if err != nil {
+		return err
+	}
+
+	if !piiStruct.typ.hasPII {
+		return nil
+	}
+
+	return piiStruct.replace(cfg.RedactFunc)
+}
+
+var defaultRedactFunc ReplaceFunc = func(_ ReplaceField, val string) (string, error) {
+	runes := []rune(val)
+	switch l := len(val); {
+	case l == 0:
+		return val, nil
+	case l > 6:
+		for i := 1; i < l-2; i++ {
+			runes[i] = '*'
+		}
+
+	case l > 3:
+		for i := 0; i < l-1; i++ {
+			runes[i] = '*'
+		}
+	default:
+		for i := 0; i < l; i++ {
+			runes[i] = '*'
+		}
+	}
+	return string(runes), nil
+}
 
 var (
 	stringType = reflect.TypeOf("")
@@ -41,14 +116,13 @@ type piiStructContext struct {
 }
 
 type piiField struct {
-	name                    string
+	sf                      reflect.StructField
 	isSub, isData, isNested bool
 	prefix                  string
 	replacement             string
 	isSlice, isMap          bool
 	nestedStructType        *piiStructType
 	nestedStructTypeRef     reflect.Type
-	rt                      reflect.Type
 }
 
 func (f piiField) getType(cache map[reflect.Type]*piiStructType) *piiStructType {
@@ -59,13 +133,14 @@ func (f piiField) getType(cache map[reflect.Type]*piiStructType) *piiStructType 
 }
 
 func (f piiField) IsZero() bool {
-	return f == piiField{}
+	// TBD find a better condition??
+	return f.sf.Name == ""
 }
 
 type piiStructType struct {
-	valid     bool
+	hasPII    bool
 	subField  piiField
-	dataField []piiField
+	piiFields []piiField
 	rt        reflect.Type
 }
 
@@ -86,50 +161,59 @@ func ptr[T any](t T) *T {
 func resolveSubject(pt piiStructType, pv reflect.Value) (string, error) {
 	s := ""
 	if !pt.subField.IsZero() {
-		s = pt.subField.prefix + reflect.Indirect(pv.FieldByName(pt.subField.name)).String()
+		s = pt.subField.prefix + reflect.Indirect(pv.FieldByIndex(pt.subField.sf.Index)).String()
 	}
 
-	for _, piiF := range pt.dataField {
+	for _, piiF := range pt.piiFields {
 		if !piiF.isNested {
 			continue
 		}
 
-		piiV := pv.FieldByName(piiF.name)
+		piiV := pv.FieldByIndex(piiF.sf.Index)
 		if piiV.IsZero() {
 			continue
 		}
 
 		cacheMu.Lock()
-		piit := piiF.getType(cache)
+		piiT := piiF.getType(cache)
 		cacheMu.Unlock()
-		if piit == nil {
+		if piiT == nil {
 			// TBD return error instead??
-			panic(fmt.Errorf("failed to resolve PII field type. This should to be possible %v", piiF))
+			panic(fmt.Errorf("unexpected: failed to resolve pii field type %v", piiF))
 		}
 
-		piiV = reflect.Indirect(pv.FieldByName(piiF.name))
+		piiV = reflect.Indirect(piiV)
 		ss := ""
 		switch {
 		case piiF.isSlice:
 			for i := 0; i < piiV.Len(); i++ {
-				ss, _ = resolveSubject(*piit, piiV.Index(i))
+				ss, _ = resolveSubject(*piiT, piiV.Index(i))
 				if ss != "" {
 					break
 				}
 			}
 		case piiF.isMap:
 			for _, k := range piiV.MapKeys() {
-				ss, _ = resolveSubject(*piit, piiV.MapIndex(k))
+				ss, _ = resolveSubject(*piiT, piiV.MapIndex(k))
 				if ss != "" {
 					break
 				}
 			}
 		default:
-			ss, _ = resolveSubject(*piit, piiV)
+			ss, _ = resolveSubject(*piiT, piiV)
 		}
 
 		if ss != "" {
-			if s != "" && s != ss {
+			// TBD: this might change in the future:
+			//
+			// This condition is generally reasonable but may cause issues when PII tags are combined with AVRO schemas.
+			// Flattened Go types generated from AVRO may contain multiple "subject" fields in a struct.
+			// To prevent issues, we restrict the struct to one "subject" field at the tree level.
+			//
+			// if s != "" && s != ss {
+			// 	return "", ErrMultipleNestedSubjectID
+			// }
+			if s != "" {
 				return "", ErrMultipleNestedSubjectID
 			}
 			s = ss
@@ -137,7 +221,7 @@ func resolveSubject(pt piiStructType, pv reflect.Value) (string, error) {
 	}
 
 	if s == "" {
-		return "", ErrSubjectIDNotFound
+		return "", fmt.Errorf("%w: %v", ErrSubjectIDNotFound, pt.rt)
 	}
 	return s, nil
 }
@@ -168,13 +252,16 @@ type ReplaceField struct {
 	Replacement string
 }
 
-func (s *piiStruct) replace(fn func(rf ReplaceField, fieldIdx int, val string) (string, error)) error {
+type ReplaceFunc func(rf ReplaceField, val string) (string, error)
+
+func (s *piiStruct) replace(fn ReplaceFunc) error {
 	var (
 		newVal string
 		err    error
 	)
-	for idx, field := range s.typ.dataField {
-		v := s.val.FieldByName(field.name)
+	for _, field := range s.typ.piiFields {
+		// v := s.val.FieldByName(field.name)
+		v := s.val.FieldByIndex(field.sf.Index)
 
 		if v.IsZero() {
 			continue
@@ -189,11 +276,11 @@ func (s *piiStruct) replace(fn func(rf ReplaceField, fieldIdx int, val string) (
 			val := elem.String()
 
 			newVal, err = fn(ReplaceField{
-				SubjectID:   s.subID,
-				RType:       field.rt,
-				Name:        field.name,
+				SubjectID: s.subID,
+				RType:     field.sf.Type,
+				// Name:        field.name,
 				Replacement: field.replacement,
-			}, idx, val)
+			}, val)
 			if err != nil {
 				return err
 			}
@@ -214,7 +301,7 @@ func (s *piiStruct) replace(fn func(rf ReplaceField, fieldIdx int, val string) (
 				panic(fmt.Errorf("failed to resolve PII field type. This should to be possible %v", field))
 			}
 			piit = *piiT
-			if !piiT.valid {
+			if !piiT.hasPII {
 				continue
 			}
 
@@ -276,51 +363,31 @@ func (s *piiStruct) replace(fn func(rf ReplaceField, fieldIdx int, val string) (
 	return nil
 }
 
-type piiMap map[int]*piiStruct
-
-func (m piiMap) subjectIDs() []string {
-	dedupMap := make(map[string]struct{})
-	subIDs := []string{}
-	for _, s := range m {
-		subID := s.subjectID()
-		if _, ok := dedupMap[subID]; ok {
-			continue
-		}
-		dedupMap[subID] = struct{}{}
-		subIDs = append(subIDs, subID)
-	}
-
-	return subIDs
-}
-
-func parseTag(tagStr string) (name string, optVals map[string]string) {
+func parseTag(tagStr string) (name string, opts map[string]string) {
 	if tagStr == "" {
 		return
 	}
 
 	tags := strings.Split(tagStr, ",")
-
 	name = strings.TrimSpace(tags[0])
-
-	optVals = make(map[string]string)
+	opts = make(map[string]string)
 	for _, opt := range tags[1:] {
 		splits := strings.Split(opt, "=")
 		if len(splits) == 2 {
 			name, val := strings.TrimSpace(splits[0]), strings.TrimSpace(splits[1])
-			optVals[name] = val
+			opts[name] = val
 		}
 	}
-
 	return
 }
 
-func scanStruct(rt reflect.Type) (piiStructType, error) {
+func scanStructType(rt reflect.Type) (piiStructType, error) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 
 	if _, ok := cache[rt]; !ok {
 		c := piiStructContext{seen: cache}
-		piit, err := scanStructWithContext(c, rt)
+		piit, err := scanStructTypeWithContext(c, rt)
 		if err != nil {
 			return piiStructType{}, err
 		}
@@ -330,38 +397,33 @@ func scanStruct(rt reflect.Type) (piiStructType, error) {
 	return *cache[rt], nil
 }
 
-func scanStructWithContext(c piiStructContext, rt reflect.Type) (piiStructType, error) {
+func scanStructTypeWithContext(c piiStructContext, rt reflect.Type) (piiStructType, error) {
 	piiFields := make([]piiField, 0)
 	var subjectField piiField
 	for i := 0; i < rt.NumField(); i++ {
-		v := rt.Field(i)
-		tags := v.Tag.Get(tagID)
+		field := rt.Field(i)
+		tags := field.Tag.Get(tagID)
 		if tags == "" {
 			continue
 		}
 
-		vv, _ := rt.FieldByName(v.Name)
-		if !vv.IsExported() {
+		if !field.IsExported() {
 			continue
 		}
 
 		name, opts := parseTag(tags)
 		piiF := piiField{
-			name:        v.Name,
+			sf:          field,
 			isSub:       name == tagSubjectID,
 			isData:      name == tagData,
 			isNested:    name == tagDive,
 			prefix:      opts["prefix"],
 			replacement: opts["replace"],
-			rt:          v.Type,
 		}
 
 		switch {
 		case piiF.isSub:
-			// if v.Type.Kind() != reflect.String {
-			// 	continue
-			// }
-			if !v.Type.ConvertibleTo(stringType) {
+			if !field.Type.ConvertibleTo(stringType) {
 				return piiStructType{}, ErrUnsupportedFieldType
 			}
 
@@ -371,7 +433,7 @@ func scanStructWithContext(c piiStructContext, rt reflect.Type) (piiStructType, 
 			subjectField = piiF
 
 		case piiF.isData:
-			tt := v.Type
+			tt := field.Type
 			if tt.Kind() == reflect.Ptr {
 				tt = tt.Elem()
 			}
@@ -381,7 +443,7 @@ func scanStructWithContext(c piiStructContext, rt reflect.Type) (piiStructType, 
 			piiFields = append(piiFields, piiF)
 
 		case piiF.isNested:
-			tt := vv.Type
+			tt := field.Type
 			if tt.Kind() == reflect.Ptr {
 				tt = tt.Elem()
 			}
@@ -399,14 +461,14 @@ func scanStructWithContext(c piiStructContext, rt reflect.Type) (piiStructType, 
 
 			_, seen := c.seen[tt]
 			if !seen {
-				var ppiit piiStructType
+				var piiType piiStructType
 				var err error
-				c.seen[tt] = &ppiit
-				ppiit, err = scanStructWithContext(c, tt)
+				c.seen[tt] = &piiType
+				piiType, err = scanStructTypeWithContext(c, tt)
 				if err != nil {
 					return piiStructType{}, err
 				}
-				piiF.nestedStructType = &ppiit
+				piiF.nestedStructType = &piiType
 			} else {
 				piiF.nestedStructTypeRef = tt
 			}
@@ -416,55 +478,72 @@ func scanStructWithContext(c piiStructContext, rt reflect.Type) (piiStructType, 
 	}
 
 	return piiStructType{
-		valid:     len(piiFields) > 0,
+		hasPII:    len(piiFields) > 0,
 		subField:  subjectField,
-		dataField: piiFields,
+		piiFields: piiFields,
 		rt:        rt,
 	}, nil
 }
 
-func scan(values ...any) (indexes piiMap, err error) {
-	indexes = make(map[int]*piiStruct, len(values))
+type scanConfig struct {
+	requireSubject bool
+}
 
+func scan(v any, opts ...func(*scanConfig)) (piiStr piiStruct, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Join(ErrInvalidTagConfiguration, err)
 		}
 	}()
 
-	for idx, v := range values {
-		v := v
-		val := reflect.ValueOf(v)
-
-		if val.Kind() != reflect.Ptr {
-			return nil, fmt.Errorf("%w at #%d", ErrUnsupportedType, idx)
-		}
-		ift := reflect.Indirect(val).Type()
-		if ift.Kind() != reflect.Struct {
-			return nil, fmt.Errorf("%w at #%d", ErrUnsupportedType, idx)
-		}
-
-		elem := val.Elem()
-
-		piiType, err := scanStruct(ift)
-		if err != nil {
-			return nil, err
-		}
-		if !piiType.valid {
+	cfg := scanConfig{}
+	for _, opt := range opts {
+		if opt == nil {
 			continue
 		}
-
-		piiStruct := &piiStruct{
-			typ: piiType,
-			val: elem,
-		}
-
-		if _, err := piiStruct.resolveSubject(); err != nil {
-			return nil, err
-		}
-
-		indexes[idx] = piiStruct
+		opt(&cfg)
 	}
 
-	return indexes, nil
+	if v == nil {
+		err = fmt.Errorf("%w: %v", ErrUnsupportedType, nil)
+		return
+	}
+
+	tt := reflect.TypeOf(v)
+	if tt.Kind() != reflect.Pointer {
+		err = fmt.Errorf("%w: %v", ErrUnsupportedType, tt)
+		return
+	}
+	if tt.Kind() == reflect.Pointer {
+		tt = tt.Elem()
+	}
+	if tt.Kind() != reflect.Struct {
+		err = fmt.Errorf("%w: %v", ErrUnsupportedType, tt)
+		return
+	}
+
+	var piiType piiStructType
+	piiType, err = scanStructType(tt)
+	if err != nil {
+		return
+	}
+	if !piiType.hasPII {
+		piiStr = piiStruct{
+			typ: piiType,
+		}
+		return
+	}
+
+	piiStr = piiStruct{
+		typ: piiType,
+		val: reflect.ValueOf(v).Elem(),
+	}
+
+	if cfg.requireSubject {
+		if _, err = piiStr.resolveSubject(); err != nil {
+			return
+		}
+	}
+
+	return
 }

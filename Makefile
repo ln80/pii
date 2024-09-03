@@ -31,3 +31,9 @@ test: lint ci/test
 
 test/coverage:
 	go tool cover -html=coverage.out
+
+bench:
+	go test -bench=$(b) -benchmem -memprofile mem.prof -memprofilerate=1  -run=^$$ -v
+
+bench/profile:
+	go tool pprof -alloc_objects mem.prof
