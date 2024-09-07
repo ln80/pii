@@ -51,8 +51,8 @@ func (e *Engine) Detokenize(ctx context.Context, namespace string, tokens []stri
 			expression.Key(hashKey).Equal(expression.Value(namespace)).
 				And(
 					expression.Key(rangeKey).Between(
-						expression.Value(tokens[0]),
-						expression.Value(tokens[len(tokens)-1]),
+						expression.Value("token#"+tokens[0]),
+						expression.Value("token#"+tokens[len(tokens)-1]),
 					),
 				),
 		).
@@ -196,7 +196,7 @@ func (e *Engine) DeleteToken(ctx context.Context, namespace string, token string
 				Value: namespace,
 			},
 			rangeKey: &types.AttributeValueMemberS{
-				Value: token,
+				Value: "token#" + token,
 			},
 		},
 		ConditionExpression:       expr.Condition(),
@@ -219,7 +219,7 @@ func (e *Engine) createTokens(ctx context.Context, namespace string, tokens []co
 		item := TokenItem{
 			Item: Item{
 				HashKey:  namespace,
-				RangeKey: t.Token,
+				RangeKey: "token#" + t.Token,
 				LSIKey:   "token@" + string(t.Value),
 			},
 			Namespace:  namespace,

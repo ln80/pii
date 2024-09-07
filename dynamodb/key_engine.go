@@ -42,7 +42,7 @@ func (e *Engine) updateKeyItem(ctx context.Context, namespace, keyID string, exp
 	if _, err := e.svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		Key: map[string]types.AttributeValue{
 			hashKey:  &types.AttributeValueMemberS{Value: namespace},
-			rangeKey: &types.AttributeValueMemberS{Value: keyID},
+			rangeKey: &types.AttributeValueMemberS{Value: "key#" + keyID},
 		},
 		TableName:                 aws.String(e.table),
 		ConditionExpression:       expr.Condition(),
@@ -78,7 +78,7 @@ func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 		out, err := e.svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 			Key: map[string]types.AttributeValue{
 				hashKey:  &types.AttributeValueMemberS{Value: nspace},
-				rangeKey: &types.AttributeValueMemberS{Value: idkey.ID()},
+				rangeKey: &types.AttributeValueMemberS{Value: "key#" + idkey.ID()},
 			},
 			TableName:                 aws.String(e.table),
 			ConditionExpression:       expr.Condition(),
@@ -107,7 +107,7 @@ func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 		kItem := KeyItem{
 			Item: Item{
 				HashKey:  nspace,
-				RangeKey: idkey.ID(),
+				RangeKey: "key#" + idkey.ID(),
 				LSIKey:   "enabled@" + idkey.ID(),
 			},
 			Namespace: nspace,
@@ -127,11 +127,7 @@ func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			NewBuilder().
 			WithCondition(
 				expression.AttributeNotExists(
-					expression.Name(hashKey),
-				).And(
-					expression.AttributeNotExists(
-						expression.Name(rangeKey),
-					),
+					expression.Name(rangeKey),
 				),
 			).Build()
 		if err != nil {
