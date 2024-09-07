@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"io"
 
 	"github.com/ln80/pii/core"
 )
@@ -58,9 +60,12 @@ func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (ci
 		return
 	}
 
-	nonce := getRandomBytes(uint16(aesgcm.NonceSize()))
+	nonce := make([]byte, aesgcm.NonceSize())
+	_, err = io.ReadFull(rand.Reader, nonce)
+	if err != nil {
+		return
+	}
 	aad := prepareAdditionalData(namespace)
-
 	cTxt, err := aesgcm.Seal(nil, nonce, []byte(plainTxt), aad), nil
 	if err != nil {
 		return
@@ -95,10 +100,8 @@ func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (p
 		return
 	}
 
-	nonceSize := aesgcm.NonceSize()
 	aad := prepareAdditionalData(namespace)
-
-	plnTxt, err := aesgcm.Open(nil, cTxt[:nonceSize], cTxt[nonceSize:], aad)
+	plnTxt, err := aesgcm.Open(nil, cTxt[:aesgcm.NonceSize()], cTxt[aesgcm.NonceSize():], aad)
 	if err != nil {
 		return
 	}
