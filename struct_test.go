@@ -511,10 +511,7 @@ func TestStruct_Scan(t *testing.T) {
 						},
 					},
 				},
-				// Case of multiple subject fields, even with the same value, should fail.
-				// This might change later on.
-				ok:  false,
-				err: ErrMultipleNestedSubjectID,
+				ok: true,
 			}
 		}(),
 		func() tc {
@@ -594,9 +591,7 @@ func TestStruct_Scan(t *testing.T) {
 
 	for i, tc := range tcs {
 		t.Run("tc: "+strconv.Itoa(i+1), func(t *testing.T) {
-			s, err := scan(tc.val, func(sc *scanConfig) {
-				sc.requireSubject = true
-			})
+			s, err := scan(tc.val, true)
 			if !tc.ok {
 				if !errors.Is(err, tc.err) {
 					t.Fatalf("expect err is %v, got %v", tc.err, err)
@@ -613,3 +608,34 @@ func TestStruct_Scan(t *testing.T) {
 		})
 	}
 }
+
+// func TestStruct_Debug(t *testing.T) {
+
+// 	pf1 := Profile{
+// 		ID:    "abc 1",
+// 		Email: "email@example.com",
+// 	}
+// 	pf2 := Profile{
+// 		ID:    "abc 2",
+// 		Email: "email@example.com",
+// 	}
+
+// 	pfs := []any{pf1, pf2}
+
+// 	ps, err := scan(pfs, false)
+// 	if err != nil {
+// 		t.Fatal("expect err be nil, got", err)
+// 	}
+// 	t.Logf("--> %+v", pfs)
+
+// 	err = ps.replace(func(rf ReplaceField, val string) (string, error) {
+
+// 		return "hello", nil
+// 	})
+
+// 	if err != nil {
+// 		t.Fatal("expect err be nil, got", err)
+// 	}
+
+// 	t.Logf("--> %+v", pfs)
+// }

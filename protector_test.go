@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strconv"
 	"testing"
 
 	"github.com/ln80/pii/core"
@@ -12,51 +11,6 @@ import (
 	"github.com/ln80/pii/testutil"
 )
 
-func TestProtector_PackUnpack(t *testing.T) {
-	tcs := []struct {
-		cipher   string
-		isPacked bool
-	}{
-		{
-			"",
-			false,
-		},
-		{
-			"<pii::",
-			false,
-		},
-		{
-			"<pii:211e98defd732758b63db24bbc05641684a13541a4e6035ddbf3820d86620d9a18e2f8e99c2a06",
-			false,
-		},
-		{
-			"<PII::211e98defd732758b63db24bbc05641684a13541a4e6035ddbf3820d86620d9a18e2f8e99c2a06",
-			false,
-		},
-		{
-			"<pii::211e98defd732758b63db24bbc05641684a13541a4e6035ddbf3820d86620d9a18e2f8e99c2a06",
-			true,
-		},
-	}
-
-	for i, tc := range tcs {
-		t.Run("tc: "+strconv.Itoa(i), func(t *testing.T) {
-			if tc.isPacked {
-				if ok := isPackedPII(tc.cipher); !ok {
-					t.Fatal("expect cipher be packed")
-				}
-				cipher := unpackPII(tc.cipher)
-				if len(cipher) == 0 {
-					t.Fatal("expect unpacked cipher be not empty")
-				}
-			} else {
-				if ok := isPackedPII(tc.cipher); ok {
-					t.Fatal("expect cipher not be packed")
-				}
-			}
-		})
-	}
-}
 func TestProtector_EncryptDecrypt(t *testing.T) {
 	ctx := context.Background()
 
@@ -107,8 +61,8 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 	})
 
 	t.Run("encrypt-decrypt unsupported type value", func(t *testing.T) {
-		tcs := []interface{}{
-			nil, pf1, pf2, make(map[string]interface{}),
+		tcs := []any{
+			nil, pf1, pf2, make(map[string]any),
 			[]byte(""), "primitive txt", 23, func() {}, make(chan int),
 		}
 
@@ -124,7 +78,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 	})
 
 	t.Run("encrypt-decrypt unsupported field type", func(t *testing.T) {
-		tcs := []interface{}{
+		tcs := []any{
 			&testutil.InvalidStruct3{Val1: "id", Val2: 30},
 		}
 
@@ -140,19 +94,28 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 	})
 
 	t.Run("encrypt-decrypt personal data with invalid tag configuration", func(t *testing.T) {
-		tcs := []interface{}{
-			&testutil.InvalidStruct1{},
-			&testutil.InvalidStruct2{Val1: "id", Val2: "otherId"},
+		tcs := []struct {
+			val        any
+			encryptErr error
+			decryptErr error
+		}{
+			{
+				val:        &testutil.InvalidStruct1{},
+				encryptErr: ErrInvalidTagConfiguration,
+			},
+			{
+				val:        &testutil.InvalidStruct2{Val1: "id", Val2: "otherId"},
+				encryptErr: ErrInvalidTagConfiguration,
+				decryptErr: ErrInvalidTagConfiguration,
+			},
 		}
 
-		want := ErrInvalidTagConfiguration
-		for _, value := range tcs {
-			err := p.Encrypt(ctx, value)
-			if !errors.Is(err, want) {
-				t.Errorf("expect err be '%v', got '%v'", want, err)
+		for _, tc := range tcs {
+			if err := p.Encrypt(ctx, tc.val); !errors.Is(err, tc.encryptErr) {
+				t.Errorf("expect err be '%v', got '%v'", tc.encryptErr, err)
 			}
-			if err := p.Decrypt(ctx, value); !errors.Is(err, want) {
-				t.Errorf("expect err be '%v', got '%v'", want, err)
+			if err := p.Decrypt(ctx, tc.val); !errors.Is(err, tc.decryptErr) {
+				t.Errorf("expect err be '%v', got '%v'", tc.decryptErr, err)
 			}
 		}
 	})
@@ -307,7 +270,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		if want, got := opf.Fullname, pf.Fullname; reflect.DeepEqual(want, got) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
-		if val := pf.Fullname; !isPackedPII(val) {
+		if val := pf.Fullname; !isWireFormatted(val) {
 			t.Fatalf("expect %s be packed and encrypted", val)
 		}
 
@@ -375,9 +338,7 @@ func BenchmarkProtector(b *testing.B) {
 
 	p := NewProtector(nspace, memory.NewKeyEngine())
 
-	b.Run("encrypt decrypt", func(b *testing.B) {
-		b.ResetTimer()
-
+	b.Run("encrypt", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			pfs := []any{
 				&testutil.Profile{
@@ -397,6 +358,33 @@ func BenchmarkProtector(b *testing.B) {
 			if err != nil {
 				b.Fatal("expect err be nil, got", err)
 			}
+
+		}
+	})
+
+	b.Run("decrypt", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			pfs := []any{
+				&testutil.Profile{
+					UserID:   "xal5430",
+					Fullname: "Idir Moore",
+					Gender:   "M",
+					Country:  "MA",
+				},
+				&testutil.Profile{
+					UserID:   "kal5430",
+					Fullname: "Idir Moore",
+					Gender:   "M",
+					Country:  "MA",
+				},
+			}
+			err := p.Encrypt(ctx, pfs...)
+			if err != nil {
+				b.Fatal("expect err be nil, got", err)
+			}
+			b.StartTimer()
+
 			if err := p.Decrypt(ctx, pfs...); err != nil {
 				b.Fatal("expect err be nil, got", err)
 			}

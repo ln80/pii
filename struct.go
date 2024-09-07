@@ -16,7 +16,7 @@ var (
 )
 
 var (
-	ErrInvalidTagConfiguration = errors.New("invalid tag configuration")
+	ErrInvalidTagConfiguration = errors.New("invalid 'pii' tag configuration")
 	ErrUnsupportedType         = errors.New("unsupported type")
 	ErrUnsupportedFieldType    = errors.New("unsupported field type must be convertible to string")
 	ErrMultipleNestedSubjectID = errors.New("potential multiple nested subject IDs")
@@ -68,7 +68,7 @@ func Redact(structPtr any, opts ...func(*RedactConfig)) error {
 		return ErrRedactFuncNotFound
 	}
 
-	piiStruct, err := scan(structPtr)
+	piiStruct, err := scan(structPtr, false)
 	if err != nil {
 		return err
 	}
@@ -145,9 +145,10 @@ type piiStructType struct {
 }
 
 type piiStruct struct {
-	typ   piiStructType
-	val   reflect.Value
-	subID string
+	typ       piiStructType
+	val       reflect.Value
+	subjectID string
+	slice     []piiStruct
 }
 
 func ptr[T any](t T) *T {
@@ -155,13 +156,13 @@ func ptr[T any](t T) *T {
 }
 
 // resolveSubject resolves the PII struct subject ID value by walking through
-// the struct and its nested PII fields.
+// the struct and its nested PII structs.
 //
 // It returns an error if the subject ID is missing or duplicated.
 func resolveSubject(pt piiStructType, pv reflect.Value) (string, error) {
-	s := ""
+	subject := ""
 	if !pt.subField.IsZero() {
-		s = pt.subField.prefix + reflect.Indirect(pv.FieldByIndex(pt.subField.sf.Index)).String()
+		subject = pt.subField.prefix + reflect.Indirect(pv.FieldByIndex(pt.subField.sf.Index)).String()
 	}
 
 	for _, piiF := range pt.piiFields {
@@ -169,8 +170,8 @@ func resolveSubject(pt piiStructType, pv reflect.Value) (string, error) {
 			continue
 		}
 
-		piiV := pv.FieldByIndex(piiF.sf.Index)
-		if piiV.IsZero() {
+		piiFV := pv.FieldByIndex(piiF.sf.Index)
+		if piiFV.IsZero() {
 			continue
 		}
 
@@ -178,66 +179,57 @@ func resolveSubject(pt piiStructType, pv reflect.Value) (string, error) {
 		piiT := piiF.getType(cache)
 		cacheMu.Unlock()
 		if piiT == nil {
-			// TBD return error instead??
-			panic(fmt.Errorf("unexpected: failed to resolve pii field type %v", piiF))
+			// TBD return error instead ??
+			panic(fmt.Errorf("unexpected: failed to resolve PII field type %v", piiF))
 		}
 
-		piiV = reflect.Indirect(piiV)
-		ss := ""
+		piiFV = reflect.Indirect(piiFV)
+		nestedSubject := ""
 		switch {
 		case piiF.isSlice:
-			for i := 0; i < piiV.Len(); i++ {
-				ss, _ = resolveSubject(*piiT, piiV.Index(i))
-				if ss != "" {
+			for i := 0; i < piiFV.Len(); i++ {
+				nestedSubject, _ = resolveSubject(*piiT, piiFV.Index(i))
+				if nestedSubject != "" {
 					break
 				}
 			}
 		case piiF.isMap:
-			for _, k := range piiV.MapKeys() {
-				ss, _ = resolveSubject(*piiT, piiV.MapIndex(k))
-				if ss != "" {
+			for _, k := range piiFV.MapKeys() {
+				nestedSubject, _ = resolveSubject(*piiT, piiFV.MapIndex(k))
+				if nestedSubject != "" {
 					break
 				}
 			}
 		default:
-			ss, _ = resolveSubject(*piiT, piiV)
+			nestedSubject, _ = resolveSubject(*piiT, piiFV)
 		}
 
-		if ss != "" {
-			// TBD: this might change in the future:
-			//
-			// This condition is generally reasonable but may cause issues when PII tags are combined with AVRO schemas.
-			// Flattened Go types generated from AVRO may contain multiple "subject" fields in a struct.
-			// To prevent issues, we restrict the struct to one "subject" field at the tree level.
-			//
-			// if s != "" && s != ss {
-			// 	return "", ErrMultipleNestedSubjectID
-			// }
-			if s != "" {
+		if nestedSubject != "" {
+			if subject != "" && subject != nestedSubject {
 				return "", ErrMultipleNestedSubjectID
 			}
-			s = ss
+			subject = nestedSubject
 		}
 	}
 
-	if s == "" {
+	if subject == "" {
 		return "", fmt.Errorf("%w: %v", ErrSubjectIDNotFound, pt.rt)
 	}
-	return s, nil
+	return subject, nil
 }
 
 func (ps *piiStruct) resolveSubject() (string, error) {
-	if ps.subID == "" {
+	if ps.subjectID == "" {
 		var err error
-		ps.subID, err = resolveSubject(ps.typ, ps.val)
+		ps.subjectID, err = resolveSubject(ps.typ, ps.val)
 		if err != nil {
 			return "", err
 		}
 	}
-	return ps.subID, nil
+	return ps.subjectID, nil
 }
 
-func (ps *piiStruct) subjectID() string {
+func (ps *piiStruct) getSubjectID() string {
 	s, err := ps.resolveSubject()
 	if err != nil {
 		panic(err)
@@ -259,9 +251,8 @@ func (s *piiStruct) replace(fn ReplaceFunc) error {
 		newVal string
 		err    error
 	)
-	for _, field := range s.typ.piiFields {
-		// v := s.val.FieldByName(field.name)
-		v := s.val.FieldByIndex(field.sf.Index)
+	for _, piiF := range s.typ.piiFields {
+		v := s.val.FieldByIndex(piiF.sf.Index)
 
 		if v.IsZero() {
 			continue
@@ -272,14 +263,13 @@ func (s *piiStruct) replace(fn ReplaceFunc) error {
 		}
 		elem := reflect.Indirect(v)
 
-		if field.isData {
+		if piiF.isData {
 			val := elem.String()
 
 			newVal, err = fn(ReplaceField{
-				SubjectID: s.subID,
-				RType:     field.sf.Type,
-				// Name:        field.name,
-				Replacement: field.replacement,
+				SubjectID:   s.subjectID,
+				RType:       piiF.sf.Type,
+				Replacement: piiF.replacement,
 			}, val)
 			if err != nil {
 				return err
@@ -290,34 +280,34 @@ func (s *piiStruct) replace(fn ReplaceFunc) error {
 			continue
 		}
 
-		if field.isNested {
-			var piit piiStructType
+		if piiF.isNested {
+			var piiT piiStructType
 
 			cacheMu.Lock()
-			piiT := field.getType(cache)
+			piiTPtr := piiF.getType(cache)
 			cacheMu.Unlock()
 
-			if piiT == nil {
-				panic(fmt.Errorf("failed to resolve PII field type. This should to be possible %v", field))
+			if piiTPtr == nil {
+				panic(fmt.Errorf("unexpected: failed to resolve PII field type %v", piiF))
 			}
-			piit = *piiT
+			piiT = *piiTPtr
 			if !piiT.hasPII {
 				continue
 			}
 
 			switch {
-			case field.isSlice:
+			case piiF.isSlice:
 				for i := 0; i < elem.Len(); i++ {
 					if err := (&piiStruct{
-						subID: s.subID, // inherit parent subject ID
-						val:   reflect.Indirect(elem.Index(i)),
-						typ:   piit,
+						subjectID: s.subjectID, // inherit parent subject ID
+						val:       reflect.Indirect(elem.Index(i)),
+						typ:       piiT,
 					}).replace(fn); err != nil {
 						return err
 					}
 				}
 
-			case field.isMap:
+			case piiF.isMap:
 				for _, k := range elem.MapKeys() {
 					mapElem := elem.MapIndex(k)
 					if mapElem.IsZero() {
@@ -329,9 +319,9 @@ func (s *piiStruct) replace(fn ReplaceFunc) error {
 						newElem.Set(mapElem)
 
 						if err := (&piiStruct{
-							subID: s.subID, // inherit parent subject ID
-							val:   newElem,
-							typ:   piit,
+							subjectID: s.subjectID, // inherit parent subject ID
+							val:       newElem,
+							typ:       piiT,
 						}).replace(fn); err != nil {
 							return err
 						}
@@ -341,18 +331,18 @@ func (s *piiStruct) replace(fn ReplaceFunc) error {
 					}
 
 					if err := (&piiStruct{
-						subID: s.subID,
-						val:   reflect.Indirect(elem.MapIndex(k)),
-						typ:   piit,
+						subjectID: s.subjectID,
+						val:       reflect.Indirect(elem.MapIndex(k)),
+						typ:       piiT,
 					}).replace(fn); err != nil {
 						return err
 					}
 				}
 			default:
 				if err := (&piiStruct{
-					subID: s.subID,
-					val:   elem,
-					typ:   piit,
+					subjectID: s.subjectID,
+					val:       elem,
+					typ:       piiT,
 				}).replace(fn); err != nil {
 					return err
 				}
@@ -387,11 +377,11 @@ func scanStructType(rt reflect.Type) (piiStructType, error) {
 
 	if _, ok := cache[rt]; !ok {
 		c := piiStructContext{seen: cache}
-		piit, err := scanStructTypeWithContext(c, rt)
+		piiT, err := scanStructTypeWithContext(c, rt)
 		if err != nil {
 			return piiStructType{}, err
 		}
-		cache[rt] = &piit
+		cache[rt] = &piiT
 	}
 
 	return *cache[rt], nil
@@ -485,24 +475,12 @@ func scanStructTypeWithContext(c piiStructContext, rt reflect.Type) (piiStructTy
 	}, nil
 }
 
-type scanConfig struct {
-	requireSubject bool
-}
-
-func scan(v any, opts ...func(*scanConfig)) (piiStr piiStruct, err error) {
+func scan(v any, requireSubject bool) (piiStr piiStruct, err error) {
 	defer func() {
 		if err != nil {
 			err = errors.Join(ErrInvalidTagConfiguration, err)
 		}
 	}()
-
-	cfg := scanConfig{}
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		opt(&cfg)
-	}
 
 	if v == nil {
 		err = fmt.Errorf("%w: %v", ErrUnsupportedType, nil)
@@ -528,6 +506,9 @@ func scan(v any, opts ...func(*scanConfig)) (piiStr piiStruct, err error) {
 		return
 	}
 	if !piiType.hasPII {
+		// As struct doesn't have PII data, no need to proceed and resolve subject ID value
+		// that's solely used to get encryption materials to encrypt/decrypt PII fields.
+		// Therefore getting calling 'reflect.ValueOf', considering its cost, doesn't make sense.
 		piiStr = piiStruct{
 			typ: piiType,
 		}
@@ -539,11 +520,10 @@ func scan(v any, opts ...func(*scanConfig)) (piiStr piiStruct, err error) {
 		val: reflect.ValueOf(v).Elem(),
 	}
 
-	if cfg.requireSubject {
+	if requireSubject {
 		if _, err = piiStr.resolveSubject(); err != nil {
 			return
 		}
 	}
-
 	return
 }

@@ -7,43 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/ln80/pii/aes"
 	"github.com/ln80/pii/core"
 	"github.com/ln80/pii/memory"
 )
-
-var (
-	// add support for attrs?
-	// packReg = regexp.MustCompile(
-	// 	`<pii:(.*):(.+)`,
-	// )
-
-	packPrefix = "<pii::"
-)
-
-// isPackedPII checks if the given text is prefixed by a tag.
-// Internally we only pack already encrypted personal data.
-// The func serves as workaround to distinguish between encrypted and plain text PII
-func isPackedPII(cipher string) bool {
-	return strings.HasPrefix(cipher, packPrefix) && len(cipher) > len(packPrefix)
-}
-
-func packPII(cipher string) string {
-	if isPackedPII(cipher) {
-		return cipher
-	}
-	return packPrefix + cipher
-}
-
-func unpackPII(cipher string) string {
-	if !isPackedPII(cipher) {
-		return ""
-	}
-	return cipher[len(packPrefix):]
-}
 
 // Errors returned by Protector service
 var (
@@ -163,14 +132,6 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 }
 
 func (p *protector) Encrypt(ctx context.Context, structPtrs ...any) (err error) {
-	if err := p.encrypt(ctx, structPtrs); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 	defer func() {
 		if err != nil {
 			err = ErrEncryptDecryptFailure.
@@ -182,17 +143,14 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 	structs := make([]piiStruct, 0)
 	subjectIDs := make([]string, 0)
 	for _, strPtr := range structPtrs {
-		strPtr := strPtr
-		piiStruct, err := scan(strPtr, func(sc *scanConfig) {
-			sc.requireSubject = true
-		})
+		piiStruct, err := scan(strPtr, true)
 		if err != nil {
 			return err
 		}
 
 		if piiStruct.typ.hasPII {
 			structs = append(structs, piiStruct)
-			subjectIDs = append(subjectIDs, piiStruct.subjectID())
+			subjectIDs = append(subjectIDs, piiStruct.getSubjectID())
 		}
 	}
 	if len(structs) == 0 {
@@ -215,7 +173,7 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 		}
 		// idempotency: no need to re-encrypt field value if it's packed
 		// packed implies already encrypted (unless a corruption occurred)
-		if isPackedPII(val) {
+		if isWireFormatted(val) {
 			newVal = val
 			return
 		}
@@ -224,7 +182,7 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 		if err != nil {
 			return
 		}
-		newVal = packPII(encVal)
+		newVal = wireFormat(rf.SubjectID, encVal)
 		return
 	}
 
@@ -237,14 +195,7 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 	return
 }
 
-func (p *protector) Decrypt(ctx context.Context, values ...any) (err error) {
-	if err := p.decrypt(ctx, values); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (p *protector) decrypt(ctx context.Context, structPtrs []any) (err error) {
+func (p *protector) Decrypt(ctx context.Context, structPtrs ...any) (err error) {
 	defer func() {
 		if err != nil {
 			err = ErrEncryptDecryptFailure.withBase(err).withNamespace(p.namespace)
@@ -252,46 +203,63 @@ func (p *protector) decrypt(ctx context.Context, structPtrs []any) (err error) {
 	}()
 
 	structs := make([]piiStruct, 0)
-	subjectIDs := make([]string, 0)
 	for _, strPtr := range structPtrs {
-		strPtr := strPtr
-		piiStruct, err := scan(strPtr, func(sc *scanConfig) {
-			sc.requireSubject = true
-		})
+		piiStruct, err := scan(strPtr, false)
 		if err != nil {
 			return err
 		}
 		if piiStruct.typ.hasPII {
 			structs = append(structs, piiStruct)
-			subjectIDs = append(subjectIDs, piiStruct.subID)
 		}
 	}
 	if len(structs) == 0 {
 		return nil
 	}
 
+	subjectIDs := make([]string, 0)
+	fn := func(rf ReplaceField, val string) (newVal string, err error) {
+		newVal = val
+		_, subjectID, _, err := parseWireFormat(val)
+		if err != nil {
+			err = nil
+			return
+		}
+		subjectIDs = append(subjectIDs, subjectID)
+		return
+	}
+	for idx, s := range structs {
+		if err = s.replace(fn); err != nil {
+			err = fmt.Errorf("%w at #%d", err, idx)
+			return
+		}
+	}
 	slices.Sort(subjectIDs)
 	subjectIDs = slices.Compact(subjectIDs)
-
 	keys, err := p.Engine.GetKeys(ctx, p.namespace, subjectIDs)
 	if err != nil {
 		return
 	}
 
-	fn := func(rf ReplaceField, val string) (newVal string, err error) {
-		key, ok := keys[rf.SubjectID]
+	fn = func(rf ReplaceField, val string) (newVal string, err error) {
+		v, subjectID, cipherText, err := parseWireFormat(val)
+		if err != nil {
+			// TBD warning ??
+			newVal = val
+			err = nil
+			return
+		}
+		if v != 1 {
+			err = errors.New("unsupported wire format version")
+			return
+		}
+
+		key, ok := keys[subjectID]
 		if !ok {
 			newVal = rf.Replacement
 			return
 		}
-		// idempotency: no need to re-encrypt field value if it's packed
-		// packed implies already encrypted (unless a corruption occurred)
-		if !isPackedPII(val) {
-			newVal = val
-			return
-		}
 
-		newVal, err = p.Encrypter.Decrypt(p.namespace, key, unpackPII(val))
+		newVal, err = p.Encrypter.Decrypt(p.namespace, key, cipherText)
 		if err != nil {
 			return "", err
 		}
@@ -299,7 +267,6 @@ func (p *protector) decrypt(ctx context.Context, structPtrs []any) (err error) {
 	}
 
 	for idx, s := range structs {
-
 		if err = s.replace(fn); err != nil {
 			err = fmt.Errorf("%w at #%d", err, idx)
 			return

@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
 
 	"github.com/ln80/pii/core"
@@ -38,7 +38,9 @@ func prepareAdditionalData(namespace string) []byte {
 		return nil
 	}
 	return append([]byte("ns:"), []byte(namespace)...)
+	// return []byte("ns:" + namespace)
 }
+
 func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt string, err error) {
 	defer func() {
 		if err != nil {
@@ -66,7 +68,8 @@ func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (ci
 
 	cTxt = append(nonce, cTxt...)
 
-	cipherTxt = fmt.Sprintf("%x", cTxt)
+	// cipherTxt = hex.EncodeToString(cTxt)
+	cipherTxt = base64.StdEncoding.EncodeToString(cTxt)
 	return
 }
 
@@ -81,7 +84,8 @@ func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (p
 	if err != nil {
 		return
 	}
-	cTxt, err := hex.DecodeString(cipherTxt)
+	// cTxt, err := hex.DecodeString(cipherTxt)
+	cTxt, err := base64.StdEncoding.DecodeString(cipherTxt)
 	if err != nil {
 		return
 	}
