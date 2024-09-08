@@ -101,7 +101,7 @@ func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (p
 	}
 
 	aad := prepareAdditionalData(namespace)
-	plnTxt, err := aesgcm.Open(nil, cTxt[:aesgcm.NonceSize()], cTxt[aesgcm.NonceSize():], aad)
+	plnTxt, err := aesgcm.Open(nil, cTxt[:aesgcm.NonceSize()], cTxt[aesgcm.NonceSize():], aad) // #nosec G407
 	if err != nil {
 		return
 	}

@@ -148,7 +148,6 @@ type piiStruct struct {
 	typ       piiStructType
 	val       reflect.Value
 	subjectID string
-	slice     []piiStruct
 }
 
 func ptr[T any](t T) *T {
