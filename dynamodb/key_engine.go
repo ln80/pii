@@ -17,28 +17,6 @@ import (
 	"github.com/ln80/pii/core"
 )
 
-// Const
-const (
-	nsHashKeyVal = "#ns_"
-
-	hashKey  = "_pk"
-	rangeKey = "_sk"
-
-	// lsi, a local secondary index, used to optimize the following read queries:
-	// - get active keys given a set of keyIDs
-	// - get disabled keys since/until a date
-	lsi    = "_lsi"
-	lsiKey = "_lsik"
-
-	attrKeyID      = "_kid"
-	attrKey        = "_key"
-	attrNamespace  = "_nspace"
-	attrDisabledAt = "_disabledAt"
-	attrDeletedAt  = "_deletedAt"
-	attrEnabledAt  = "_enabledAt"
-	attrState      = "_state"
-)
-
 type Item struct {
 	HashKey  string `dynamodbav:"_pk"`
 	RangeKey string `dynamodbav:"_sk"`
@@ -58,160 +36,13 @@ type KeyItem struct {
 	EnabledAt  int64  `dynamodbav:"_enabledAt,omitempty"`
 }
 
-type NamespaceItem struct {
-	Item
-	Namespace string `dynamodbav:"_nspace"`
-	At        int64  `dynamodbav:"_at"`
-}
+var _ core.KeyEngine = &Engine{}
 
-// NamespaceRegistry mainly used internally or by a cron to look up for namespaces to clean.
-type NamespaceRegistry interface {
-	// ListNamespace returns a list of registred namespaces.
-	// Namespaces are mainly added to the internal registry during the GetOrCtreateKeys ops.
-	ListNamespace(ctx context.Context) ([]string, error)
-}
-
-// KeyEngineConfig is an alias to core.KeyEngineConfig type defined in the core package.
-// It may change later to extend the core one.
-type KeyEngineConfig core.KeyEngineConfig
-
-// KeyEngine extends core.KeyEngine to add NamespaceRegistry utilities
-type KeyEngine interface {
-	core.KeyEngine
-	NamespaceRegistry
-}
-
-type engine struct {
-	svc   ClientAPI
-	table string
-
-	*KeyEngineConfig
-}
-
-var _ core.KeyEngine = &engine{}
-
-// NewKeyEngine returns a core.KeyEngine implementation built on top of a Dynamodb table.
-//
-// It requires a non-empty value for Dynamodb client service and table name parameters. Otherwise, it will panic.
-func NewKeyEngine(svc ClientAPI, table string, opts ...func(ec *KeyEngineConfig)) KeyEngine {
-	if svc == nil {
-		panic("invalid Dynamodb client service, nil value found")
-	}
-	if table == "" {
-		panic("invalid dynamodb table name, empty value found")
-	}
-
-	defaultCfg := KeyEngineConfig(core.NewKeyEngineConfig())
-	eng := &engine{
-		svc:             svc,
-		table:           table,
-		KeyEngineConfig: &defaultCfg,
-	}
-
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		opt(eng.KeyEngineConfig)
-	}
-
-	return eng
-}
-
-func (e *engine) addNamespace(ctx context.Context, namespace string) error {
-	item := NamespaceItem{
-		Item: Item{
-			HashKey:  nsHashKeyVal,
-			RangeKey: namespace,
-		},
-		Namespace: namespace,
-		At:        time.Now().Unix(),
-	}
-
-	m, err := attributevalue.MarshalMap(item)
-	if err != nil {
-		return err
-	}
-
-	expr, err := expression.
-		NewBuilder().
-		WithCondition(
-			expression.AttributeNotExists(
-				expression.Name(hashKey),
-			).And(
-				expression.AttributeNotExists(
-					expression.Name(rangeKey),
-				),
-			),
-		).Build()
-	if err != nil {
-		return err
-	}
-
-	if _, err := e.svc.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName:                 aws.String(e.table),
-		Item:                      m,
-		ConditionExpression:       expr.Condition(),
-		ExpressionAttributeNames:  expr.Names(),
-		ExpressionAttributeValues: expr.Values(),
-	}); err != nil {
-		if isConditionCheckFailure(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-func (e *engine) ListNamespace(ctx context.Context) ([]string, error) {
-	expr, err := expression.NewBuilder().
-		WithKeyCondition(
-			expression.Key(hashKey).Equal(expression.Value(nsHashKeyVal)),
-		).
-		WithProjection(
-			expression.NamesList(expression.Name(attrNamespace)),
-		).
-		Build()
-	if err != nil {
-		return nil, err
-	}
-
-	p := dynamodb.NewQueryPaginator(e.svc, &dynamodb.QueryInput{
-		TableName:                 aws.String(e.table),
-		KeyConditionExpression:    expr.KeyCondition(),
-		ExpressionAttributeNames:  expr.Names(),
-		ExpressionAttributeValues: expr.Values(),
-		FilterExpression:          expr.Filter(),
-		ConsistentRead:            aws.Bool(true),
-		ProjectionExpression:      expr.Projection(),
-	})
-
-	items := []NamespaceItem{}
-	for p.HasMorePages() {
-		out, err := p.NextPage(ctx)
-		if err != nil {
-			return nil, err
-		}
-		pageItems := []NamespaceItem{}
-		if err = attributevalue.UnmarshalListOfMaps(out.Items, &pageItems); err != nil {
-			return nil, err
-		}
-		items = append(items, pageItems...)
-	}
-
-	r := make([]string, len(items))
-	for i, item := range items {
-		r[i] = item.Namespace
-	}
-
-	return r, nil
-}
-
-func (e *engine) updateKeyItem(ctx context.Context, namespace, keyID string, expr expression.Expression) error {
+func (e *Engine) updateKeyItem(ctx context.Context, namespace, keyID string, expr expression.Expression) error {
 	if _, err := e.svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		Key: map[string]types.AttributeValue{
 			hashKey:  &types.AttributeValueMemberS{Value: namespace},
-			rangeKey: &types.AttributeValueMemberS{Value: keyID},
+			rangeKey: &types.AttributeValueMemberS{Value: "key#" + keyID},
 		},
 		TableName:                 aws.String(e.table),
 		ConditionExpression:       expr.Condition(),
@@ -224,7 +55,7 @@ func (e *engine) updateKeyItem(ctx context.Context, namespace, keyID string, exp
 	return nil
 }
 
-func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKey) (disabledOrDeleted map[string]struct{}, freshNew map[string]string, err error) {
+func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKey) (disabledOrDeleted map[string]struct{}, freshNew map[string]string, err error) {
 	disabledOrDeleted = map[string]struct{}{}
 	freshNew = map[string]string{}
 
@@ -247,7 +78,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 		out, err := e.svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 			Key: map[string]types.AttributeValue{
 				hashKey:  &types.AttributeValueMemberS{Value: nspace},
-				rangeKey: &types.AttributeValueMemberS{Value: idkey.ID()},
+				rangeKey: &types.AttributeValueMemberS{Value: "key#" + idkey.ID()},
 			},
 			TableName:                 aws.String(e.table),
 			ConditionExpression:       expr.Condition(),
@@ -276,7 +107,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 		kItem := KeyItem{
 			Item: Item{
 				HashKey:  nspace,
-				RangeKey: idkey.ID(),
+				RangeKey: "key#" + idkey.ID(),
 				LSIKey:   "enabled@" + idkey.ID(),
 			},
 			Namespace: nspace,
@@ -296,11 +127,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			NewBuilder().
 			WithCondition(
 				expression.AttributeNotExists(
-					expression.Name(hashKey),
-				).And(
-					expression.AttributeNotExists(
-						expression.Name(rangeKey),
-					),
+					expression.Name(rangeKey),
 				),
 			).Build()
 		if err != nil {
@@ -328,7 +155,7 @@ func (e *engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 }
 
 // DeleteKey implements core.KeyEngine
-func (e *engine) DeleteKey(ctx context.Context, namespace string, keyID string) (err error) {
+func (e *Engine) DeleteKey(ctx context.Context, namespace string, keyID string) (err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("%w: %v", core.ErrDeleteKeyFailure, err)
@@ -363,7 +190,7 @@ func (e *engine) DeleteKey(ctx context.Context, namespace string, keyID string) 
 }
 
 // DisableKey implements core.KeyEngine
-func (e *engine) DisableKey(ctx context.Context, namespace string, keyID string) (err error) {
+func (e *Engine) DisableKey(ctx context.Context, namespace string, keyID string) (err error) {
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, core.ErrKeyNotFound) {
@@ -403,7 +230,7 @@ func (e *engine) DisableKey(ctx context.Context, namespace string, keyID string)
 }
 
 // RenableKey implements core.KeyEngine
-func (e *engine) RenableKey(ctx context.Context, namespace string, keyID string) (err error) {
+func (e *Engine) RenableKey(ctx context.Context, namespace string, keyID string) (err error) {
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, core.ErrKeyNotFound) {
@@ -442,10 +269,10 @@ func (e *engine) RenableKey(ctx context.Context, namespace string, keyID string)
 }
 
 // GetKeys implements core.KeyEngine
-func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs []string) (keys core.KeyMap, err error) {
+func (e *Engine) GetKeys(ctx context.Context, namespace string, keyIDs []string) (keys core.KeyMap, err error) {
 	count := len(keyIDs)
 	if count == 0 {
-		return keys, nil
+		return
 	}
 
 	defer func() {
@@ -518,8 +345,9 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs []string)
 }
 
 // GetOrCreateKeys implements core.KeyEngine
-func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen core.KeyGen) (keys core.KeyMap, err error) {
+func (e *Engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen core.KeyGen) (keys core.KeyMap, err error) {
 	if keyGen == nil {
+		// TBD this should not be set by default. Fail if it's nil instead
 		keyGen = aes.Key256GenFn
 	}
 
@@ -530,7 +358,8 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %v", core.ErrPeristKeyFailure, err)
+			// err = fmt.Errorf("%w: %v", core.ErrPersistKeyFailure, err)
+			err = errors.Join(core.ErrPersistKeyFailure, err)
 		}
 	}()
 
@@ -578,7 +407,7 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 }
 
 // DeleteUnusedKeys implements core.KeyEngine
-func (e *engine) DeleteUnusedKeys(ctx context.Context, namespace string) (err error) {
+func (e *Engine) DeleteUnusedKeys(ctx context.Context, namespace string) (err error) {
 	expr, err := expression.NewBuilder().
 		WithKeyCondition(
 			expression.Key(hashKey).Equal(expression.Value(namespace)).And(

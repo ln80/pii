@@ -12,7 +12,7 @@ import (
 
 // Interface guard:
 // Make sure Engine Mock implements dynamodb extended key engine
-var _ KeyEngine = &testutil.EngineMock{}
+var _ core.KeyEngine = &testutil.EngineMock{}
 
 func TestKeyEngine(t *testing.T) {
 	ctx := context.Background()
@@ -29,15 +29,14 @@ func TestKeyEngine(t *testing.T) {
 					t.Fatalf("expect NewKeyEngine to panic")
 				}
 			}()
-			_ = NewKeyEngine(nil, "")
-
+			_ = NewEngine(nil, "")
 		})
 
 		t.Run("manage key lifecycle", func(t *testing.T) {
 			gracePeriod := 3 * time.Millisecond
 			nspace := "tnt-54R"
 
-			eng := NewKeyEngine(dbsvc.(ClientAPI), table, func(ec *KeyEngineConfig) {
+			eng := NewEngine(dbsvc.(ClientAPI), table, func(ec *EngineConfig) {
 				ec.GracePeriod = gracePeriod
 			}, nil)
 
@@ -47,8 +46,7 @@ func TestKeyEngine(t *testing.T) {
 			})
 
 			// extended behavior:
-			// assert dynamodb engine can returns list of registred namespace
-			// during keys management
+			// assert that dynamodb engine can returns a list of registered namespaces
 			ns, err := eng.ListNamespace(ctx)
 			if err != nil {
 				t.Fatalf("expect err be nil, got: %v", err)
@@ -68,7 +66,7 @@ func TestKeyEngine_createKeys(t *testing.T) {
 	ctx := context.Background()
 
 	db_testutil.WithDynamoDBTable(t, func(dbsvc interface{}, table string) {
-		eng := NewKeyEngine(dbsvc.(ClientAPI), table).(*engine)
+		eng := NewEngine(dbsvc.(ClientAPI), table)
 
 		nspace := "tenant-p1ds7"
 

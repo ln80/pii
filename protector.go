@@ -6,43 +6,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"slices"
 	"time"
 
 	"github.com/ln80/pii/aes"
 	"github.com/ln80/pii/core"
 	"github.com/ln80/pii/memory"
 )
-
-var (
-	// add support for attrs?
-	// packReg = regexp.MustCompile(
-	// 	`<pii:(.*):(.+)`,
-	// )
-
-	packPrefix = "<pii::"
-)
-
-// isPackedPII checks if the given text is prefixed by a tag.
-// Internally we only pack already encrypted personal data.
-// The func serves as workaround to distinguish between encrypted and plain text PII
-func isPackedPII(cipher string) bool {
-	return strings.HasPrefix(cipher, packPrefix) && len(cipher) > len(packPrefix)
-}
-
-func packPII(cipher string) string {
-	if isPackedPII(cipher) {
-		return cipher
-	}
-	return packPrefix + cipher
-}
-
-func unpackPII(cipher string) string {
-	if !isPackedPII(cipher) {
-		return ""
-	}
-	return cipher[len(packPrefix):]
-}
 
 // Errors returned by Protector service
 var (
@@ -61,7 +31,7 @@ type Protector interface {
 	// Encrypt encrypts Personal data fields of the given structs pointers.
 	// It does its best to ensure atomicity in case of multiple structs pointers.
 	// It ensures idempotency and only encrypts fields once.
-	Encrypt(ctx context.Context, structPts ...interface{}) error
+	Encrypt(ctx context.Context, structPts ...any) error
 
 	// Decrypt decrypts Personal data fields of the given structs pointers.
 	// It does its best to ensure in case of multiple structs pointers.
@@ -69,18 +39,21 @@ type Protector interface {
 	//
 	// It replaces the field value with a replacement message, defined in the tag,
 	// if the subject is forgotten. Otherwise, the field will be kept empty.
-	Decrypt(ctx context.Context, structPts ...interface{}) error
+	Decrypt(ctx context.Context, structPts ...any) error
 
 	// Forget removes the associated encryption materials of the given subject,
 	// and crypto-erases its Personal data.
 	Forget(ctx context.Context, subID string) error
 
 	// Recover allows to recover encryption materials of the given subject.
-	// It will fail if the grace period was exceeded, and encryption materials were hard deleted.
+	//
+	// It fails if the grace period was exceeded, and encryption materials were hard deleted.
 	Recover(ctx context.Context, subID string) error
 
 	// Clear clears encryption materials' cache based on cache-related configuration.
 	Clear(ctx context.Context, force bool) error
+
+	core.TokenEngine
 }
 
 // ProtectorConfig presents the configuration of Protector service
@@ -103,6 +76,9 @@ type ProtectorConfig struct {
 	// GracefulMode allows first to disable the encryption materials during a graceful period.
 	// Therefore recovery may succeed. Otherwise, encryption materials are immediately deleted.
 	GracefulMode bool
+
+	// TokenEngine is an implementation of core.TokenEngine
+	TokenEngine core.TokenEngine
 }
 
 type protector struct {
@@ -155,15 +131,7 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 	return p
 }
 
-func (p *protector) Encrypt(ctx context.Context, structPtrs ...interface{}) (err error) {
-	if err := p.encrypt(ctx, structPtrs); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
+func (p *protector) Encrypt(ctx context.Context, structPtrs ...any) (err error) {
 	defer func() {
 		if err != nil {
 			err = ErrEncryptDecryptFailure.
@@ -172,20 +140,32 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 		}
 	}()
 
-	structs, err := scan(structPtrs...)
-	if err != nil {
-		return err
+	structs := make([]piiStruct, 0)
+	subjectIDs := make([]string, 0)
+	for _, strPtr := range structPtrs {
+		piiStruct, err := scan(strPtr, true)
+		if err != nil {
+			return err
+		}
+
+		if piiStruct.typ.hasPII {
+			structs = append(structs, piiStruct)
+			subjectIDs = append(subjectIDs, piiStruct.getSubjectID())
+		}
 	}
 	if len(structs) == 0 {
 		return nil
 	}
 
-	keys, err := p.Engine.GetOrCreateKeys(ctx, p.namespace, structs.subjectIDs(), p.Encrypter.KeyGen())
+	slices.Sort(subjectIDs)
+	subjectIDs = slices.Compact(subjectIDs)
+
+	keys, err := p.Engine.GetOrCreateKeys(ctx, p.namespace, subjectIDs, p.Encrypter.KeyGen())
 	if err != nil {
 		return err
 	}
 
-	fn := func(rf ReplaceField, fieldIdx int, val string) (newVal string, err error) {
+	fn := func(rf ReplaceField, val string) (newVal string, err error) {
 		key, ok := keys[rf.SubjectID]
 		if !ok {
 			err = ErrSubjectForgotten.withSubject(rf.SubjectID)
@@ -193,7 +173,7 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 		}
 		// idempotency: no need to re-encrypt field value if it's packed
 		// packed implies already encrypted (unless a corruption occurred)
-		if isPackedPII(val) {
+		if isWireFormatted(val) {
 			newVal = val
 			return
 		}
@@ -202,7 +182,7 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 		if err != nil {
 			return
 		}
-		newVal = packPII(encVal)
+		newVal = wireFormat(rf.SubjectID, encVal)
 		return
 	}
 
@@ -212,53 +192,74 @@ func (p *protector) encrypt(ctx context.Context, structPtrs []any) (err error) {
 			return
 		}
 	}
-
 	return
 }
 
-func (p *protector) Decrypt(ctx context.Context, values ...interface{}) (err error) {
-	if err := p.decrypt(ctx, values); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (p *protector) decrypt(ctx context.Context, values []any) (err error) {
+func (p *protector) Decrypt(ctx context.Context, structPtrs ...any) (err error) {
 	defer func() {
 		if err != nil {
 			err = ErrEncryptDecryptFailure.withBase(err).withNamespace(p.namespace)
 		}
 	}()
 
-	structs, err := scan(values...)
-	if err != nil {
-		return
+	structs := make([]piiStruct, 0)
+	for _, strPtr := range structPtrs {
+		piiStruct, err := scan(strPtr, false)
+		if err != nil {
+			return err
+		}
+		if piiStruct.typ.hasPII {
+			structs = append(structs, piiStruct)
+		}
 	}
-
 	if len(structs) == 0 {
 		return nil
 	}
 
-	keys, err := p.Engine.GetKeys(ctx, p.namespace, structs.subjectIDs())
+	subjectIDs := make([]string, 0)
+	fn := func(rf ReplaceField, val string) (newVal string, err error) {
+		newVal = val
+		_, subjectID, _, err := parseWireFormat(val)
+		if err != nil {
+			err = nil
+			return
+		}
+		subjectIDs = append(subjectIDs, subjectID)
+		return
+	}
+	for idx, s := range structs {
+		if err = s.replace(fn); err != nil {
+			err = fmt.Errorf("%w at #%d", err, idx)
+			return
+		}
+	}
+	slices.Sort(subjectIDs)
+	subjectIDs = slices.Compact(subjectIDs)
+	keys, err := p.Engine.GetKeys(ctx, p.namespace, subjectIDs)
 	if err != nil {
 		return
 	}
 
-	fn := func(rf ReplaceField, fieldIdx int, val string) (newVal string, err error) {
-		key, ok := keys[rf.SubjectID]
-		if !ok {
-			newVal = rf.Replacement
-			// err = ErrSubjectForgotten.withSubject(rf.SubjectID)
+	fn = func(rf ReplaceField, val string) (newVal string, err error) {
+		v, subjectID, cipherText, err := parseWireFormat(val)
+		if err != nil {
+			// TBD warning ??
+			newVal = val
+			err = nil
 			return
 		}
-		// idempotency: no need to re-encrypt field value if it's packed
-		// packed implies already encrypted (unless a corruption occurred)
-		if !isPackedPII(val) {
-			newVal = val
+		if v != 1 {
+			err = errors.New("unsupported wire format version")
 			return
 		}
 
-		newVal, err = p.Encrypter.Decrypt(p.namespace, key, unpackPII(val))
+		key, ok := keys[subjectID]
+		if !ok {
+			newVal = rf.Replacement
+			return
+		}
+
+		newVal, err = p.Encrypter.Decrypt(p.namespace, key, cipherText)
 		if err != nil {
 			return "", err
 		}
@@ -266,7 +267,6 @@ func (p *protector) decrypt(ctx context.Context, values []any) (err error) {
 	}
 
 	for idx, s := range structs {
-
 		if err = s.replace(fn); err != nil {
 			err = fmt.Errorf("%w at #%d", err, idx)
 			return
@@ -338,4 +338,27 @@ func (p *protector) Clear(ctx context.Context, force bool) (err error) {
 	}
 
 	return
+}
+
+// Detokenize implements Protector.
+func (p *protector) Detokenize(ctx context.Context, namespace string, tokens []string) (core.TokenValueMap, error) {
+	if p.TokenEngine == nil {
+		panic("unsupported action. token engine not found")
+	}
+	return p.TokenEngine.Detokenize(ctx, namespace, tokens)
+}
+
+// Tokenize implements Protector.
+func (p *protector) Tokenize(ctx context.Context, namespace string, values []core.TokenData, opts ...func(*core.TokenizeConfig)) (core.ValueTokenMap, error) {
+	if p.TokenEngine == nil {
+		panic("unsupported action. token engine not found")
+	}
+	return p.TokenEngine.Tokenize(ctx, namespace, values)
+}
+
+func (p *protector) DeleteToken(ctx context.Context, namespace string, token string) error {
+	if p.TokenEngine == nil {
+		panic("unsupported action. token engine not found")
+	}
+	return p.TokenEngine.DeleteToken(ctx, namespace, token)
 }

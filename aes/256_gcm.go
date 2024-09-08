@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/hex"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"io"
 
 	"github.com/ln80/pii/core"
 )
@@ -38,7 +40,9 @@ func prepareAdditionalData(namespace string) []byte {
 		return nil
 	}
 	return append([]byte("ns:"), []byte(namespace)...)
+	// return []byte("ns:" + namespace)
 }
+
 func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt string, err error) {
 	defer func() {
 		if err != nil {
@@ -56,9 +60,12 @@ func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (ci
 		return
 	}
 
-	nonce := getRandomBytes(uint16(aesgcm.NonceSize()))
+	nonce := make([]byte, aesgcm.NonceSize())
+	_, err = io.ReadFull(rand.Reader, nonce)
+	if err != nil {
+		return
+	}
 	aad := prepareAdditionalData(namespace)
-
 	cTxt, err := aesgcm.Seal(nil, nonce, []byte(plainTxt), aad), nil
 	if err != nil {
 		return
@@ -66,7 +73,8 @@ func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (ci
 
 	cTxt = append(nonce, cTxt...)
 
-	cipherTxt = fmt.Sprintf("%x", cTxt)
+	// cipherTxt = hex.EncodeToString(cTxt)
+	cipherTxt = base64.StdEncoding.EncodeToString(cTxt)
 	return
 }
 
@@ -81,7 +89,8 @@ func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (p
 	if err != nil {
 		return
 	}
-	cTxt, err := hex.DecodeString(cipherTxt)
+	// cTxt, err := hex.DecodeString(cipherTxt)
+	cTxt, err := base64.StdEncoding.DecodeString(cipherTxt)
 	if err != nil {
 		return
 	}
@@ -91,10 +100,8 @@ func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (p
 		return
 	}
 
-	nonceSize := aesgcm.NonceSize()
 	aad := prepareAdditionalData(namespace)
-
-	plnTxt, err := aesgcm.Open(nil, cTxt[:nonceSize], cTxt[nonceSize:], aad)
+	plnTxt, err := aesgcm.Open(nil, cTxt[:aesgcm.NonceSize()], cTxt[aesgcm.NonceSize():], aad) // #nosec G407
 	if err != nil {
 		return
 	}
