@@ -5,7 +5,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"io"
 
@@ -16,12 +15,9 @@ const (
 	aES265KeySize = 32
 )
 
-var (
-	// Key256GenFn returns a function that generates a 32 bytes key
-	Key256GenFn core.KeyGen = func(ctx context.Context, namespace, subID string) (string, error) {
-		return string(getRandomBytes(aES265KeySize)), nil
-	}
-)
+func Key256GenFn(ctx context.Context, namespace, subID string) (string, error) {
+	return string(getRandomBytes(aES265KeySize)), nil
+}
 
 type aes256gcm struct{}
 
@@ -40,13 +36,12 @@ func prepareAdditionalData(namespace string) []byte {
 		return nil
 	}
 	return append([]byte("ns:"), []byte(namespace)...)
-	// return []byte("ns:" + namespace)
 }
 
-func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt string, err error) {
+func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt []byte, err error) {
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %v", core.ErrEnryptionFailure, err)
+			err = fmt.Errorf("%w: %v", core.ErrEncryptionFailure, err)
 		}
 	}()
 
@@ -73,12 +68,10 @@ func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (ci
 
 	cTxt = append(nonce, cTxt...)
 
-	// cipherTxt = hex.EncodeToString(cTxt)
-	cipherTxt = base64.StdEncoding.EncodeToString(cTxt)
-	return
+	return cTxt, nil
 }
 
-func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (plainTxt string, err error) {
+func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt []byte) (plainTxt string, err error) {
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("%w: %v", core.ErrDecryptionFailure, err)
@@ -89,11 +82,6 @@ func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (p
 	if err != nil {
 		return
 	}
-	// cTxt, err := hex.DecodeString(cipherTxt)
-	cTxt, err := base64.StdEncoding.DecodeString(cipherTxt)
-	if err != nil {
-		return
-	}
 
 	aesgcm, err := cipher.NewGCM(block)
 	if err != nil {
@@ -101,7 +89,7 @@ func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt string) (p
 	}
 
 	aad := prepareAdditionalData(namespace)
-	plnTxt, err := aesgcm.Open(nil, cTxt[:aesgcm.NonceSize()], cTxt[aesgcm.NonceSize():], aad) // #nosec G407
+	plnTxt, err := aesgcm.Open(nil, cipherTxt[:aesgcm.NonceSize()], cipherTxt[aesgcm.NonceSize():], aad) // #nosec G407
 	if err != nil {
 		return
 	}

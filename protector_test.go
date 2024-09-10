@@ -179,7 +179,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 		}
 		opf2 := pf2
 
-		if want, err := core.ErrEnryptionFailure, p.Encrypt(ctx, &pf1, &pf2); !errors.Is(err, want) {
+		if want, err := core.ErrEncryptionFailure, p.Encrypt(ctx, &pf1, &pf2); !errors.Is(err, want) {
 			t.Fatalf("expect err be %v, got %v", want, err)
 		}
 
@@ -271,7 +271,7 @@ func TestProtector_EncryptDecrypt(t *testing.T) {
 			t.Fatalf("expect %v, %v not be equals", want, got)
 		}
 		if val := pf.Fullname; !isWireFormatted(val) {
-			t.Fatalf("expect %s be packed and encrypted", val)
+			t.Fatalf("expect %s be wire formatted and encrypted", val)
 		}
 
 		// forget subjectID i.e, forget subjectID's encryption key

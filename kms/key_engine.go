@@ -24,7 +24,7 @@ type engine struct {
 var _ core.KeyEngineWrapper = &engine{}
 
 // NewKMSWrapper returns a core.KeyEngineWrapper.
-// It securly generates and encrypts keys' values using a KMS Master key.
+// It securely generates and encrypts keys' values using a KMS Master key.
 //
 // It lightens the wrapped engine's security requirements which can be built on top of a regular database.
 //
@@ -107,6 +107,23 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 	// TODO: do not fully ignore keyGen param
 	// if not nil generate a key to catch size: 16 or 32, or 64 bytes, then adapt KMS keyGen func
 	// return an error if key size is not supported by KMS
+
+	numberOfBytes := int32(32)
+	if keyGenFn != nil {
+		tmpKey, err := keyGenFn(ctx, namespace, "tmpKeyID")
+		if err == nil {
+			switch l := len(tmpKey); l {
+			case 16:
+				numberOfBytes = 16
+			case 64:
+				numberOfBytes = 64
+			default:
+				err = fmt.Errorf("incompatible resolved key length: %d", l)
+				return nil, err
+			}
+		}
+	}
+
 	keyGen := func(ctx context.Context, namespace, keyID string) (string, error) {
 		kmsKey, err := e.kmsResolver.KeyOf(ctx, namespace, keyID)
 		if err != nil {
@@ -115,7 +132,7 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		out, err := e.kmsvc.GenerateDataKey(ctx, &kms.GenerateDataKeyInput{
 			KeyId:             aws.String(kmsKey),
 			EncryptionContext: encCtx,
-			NumberOfBytes:     aws.Int32(32),
+			NumberOfBytes:     aws.Int32(numberOfBytes),
 		})
 		if err != nil {
 			return "", err
