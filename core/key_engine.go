@@ -139,24 +139,3 @@ type KeyEngineCache interface {
 	// 'force' parameter allows to bypass the TTL check and immediately invalidates the cache.
 	ClearCache(ctx context.Context, namespace string, force bool) error
 }
-
-// Errors returned by Encrypter implementations
-var (
-	ErrEnryptionFailure  = errors.New("failed to encrypt data")
-	ErrDecryptionFailure = errors.New("failed to decrypt data")
-)
-
-// Encrypter presents a service responsible for implementing encryption logic
-// based on a specific algorithm.
-type Encrypter interface {
-
-	// Encrypt encrypts the given plain text values and returns a cipher text.
-	Encrypt(namespace string, key Key, plainTxt string) (cipherTxt string, err error)
-
-	// Decrypt decrypts the given cipher text and return the original value.
-	Decrypt(namespace string, key Key, cipherTxt string) (plainTxt string, err error)
-
-	// KeyGen returns a function that generates a valid key
-	// according to the implemented algorithm.
-	KeyGen() KeyGen
-}

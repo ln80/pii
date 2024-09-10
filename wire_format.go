@@ -31,18 +31,19 @@ func isWireFormatted(str string) bool {
 	return wireFormatRegex.Match([]byte(str))
 }
 
-func wireFormat(subjectID, cipherText string, version ...int) string {
+func wireFormat(subjectID string, cipherText []byte, version ...int) string {
 	v := ""
 	if len(version) > 0 && version[0] > 1 {
 		v = strconv.Itoa(version[0])
 	}
 
 	base64SubjectID := base64.StdEncoding.EncodeToString([]byte(subjectID))
+	base64CipherText := base64.StdEncoding.EncodeToString(cipherText)
 
-	return "<pii:" + v + ":" + base64SubjectID + ":" + cipherText
+	return "<pii:" + v + ":" + base64SubjectID + ":" + base64CipherText
 }
 
-func parseWireFormat(str string) (version int, subjectID string, cipherText string, err error) {
+func parseWireFormat(str string) (version int, subjectID string, cipherText []byte, err error) {
 	if err = CheckFormat(str); err != nil {
 		// err = fmt.Errorf("%w: %s", err, str)
 		// err = fmt.Errorf("%w: %s", err, str)
@@ -66,7 +67,11 @@ func parseWireFormat(str string) (version int, subjectID string, cipherText stri
 	}
 	subjectID = string(subjectBytes)
 
-	cipherText = parts[2]
+	cipherText, err = base64.StdEncoding.DecodeString(parts[2])
+	if err != nil {
+		err = errors.Join(ErrInvalidWireFormat, err)
+		return
+	}
 
 	return
 }

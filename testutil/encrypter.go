@@ -24,7 +24,7 @@ func (e *UnstableEncrypterMock) ResetCounter() {
 }
 
 // Decrypt implements core.Encrypter
-func (e *UnstableEncrypterMock) Decrypt(namespace string, key core.Key, cipherTxt string) (plainTxt string, err error) {
+func (e *UnstableEncrypterMock) Decrypt(namespace string, key core.Key, cipherTxt []byte) (plainTxt string, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
@@ -33,20 +33,20 @@ func (e *UnstableEncrypterMock) Decrypt(namespace string, key core.Key, cipherTx
 	}
 	e.counter++
 
-	return cipherTxt[len("mock"):], nil
+	return string(cipherTxt[len("mock"):]), nil
 }
 
 // Encrypt implements core.Encrypter
-func (e *UnstableEncrypterMock) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt string, err error) {
+func (e *UnstableEncrypterMock) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt []byte, err error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
 	if e.counter >= e.PointOfFailure {
-		return "", fmt.Errorf("%w: %v", core.ErrEnryptionFailure, ErrEncryptionMock)
+		return nil, fmt.Errorf("%w: %v", core.ErrEncryptionFailure, ErrEncryptionMock)
 	}
 	e.counter++
 
-	return "mock" + plainTxt, nil
+	return []byte("mock" + plainTxt), nil
 }
 
 // KeyGen implements core.Encrypter

@@ -171,18 +171,18 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...any) (err error) 
 			err = ErrSubjectForgotten.withSubject(rf.SubjectID)
 			return
 		}
-		// idempotency: no need to re-encrypt field value if it's packed
-		// packed implies already encrypted (unless a corruption occurred)
+		// idempotency: no need to re-encrypt field value if it's wire formatted.
+		// wire formatted implies, it's already encrypted
 		if isWireFormatted(val) {
 			newVal = val
 			return
 		}
 
-		encVal, err := p.Encrypter.Encrypt(p.namespace, key, val)
+		encodedVal, err := p.Encrypter.Encrypt(p.namespace, key, val)
 		if err != nil {
 			return
 		}
-		newVal = wireFormat(rf.SubjectID, encVal)
+		newVal = wireFormat(rf.SubjectID, encodedVal)
 		return
 	}
 

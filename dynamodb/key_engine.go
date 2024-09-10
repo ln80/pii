@@ -347,7 +347,7 @@ func (e *Engine) GetKeys(ctx context.Context, namespace string, keyIDs []string)
 // GetOrCreateKeys implements core.KeyEngine
 func (e *Engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs []string, keyGen core.KeyGen) (keys core.KeyMap, err error) {
 	if keyGen == nil {
-		// TBD this should not be set by default. Fail if it's nil instead
+		// TBD this should not be set by default. Fail if it's nil instead.
 		keyGen = aes.Key256GenFn
 	}
 

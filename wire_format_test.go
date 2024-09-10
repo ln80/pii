@@ -12,8 +12,8 @@ func TestWireFormat(t *testing.T) {
 		return base64.StdEncoding.EncodeToString([]byte(str))
 	}
 	tcs := []struct {
-		input    string
-		isPacked bool
+		input           string
+		isWireFormatted bool
 	}{
 		{
 			"",
@@ -55,7 +55,7 @@ func TestWireFormat(t *testing.T) {
 
 	for i, tc := range tcs {
 		t.Run("tc: "+strconv.Itoa(i), func(t *testing.T) {
-			if tc.isPacked {
+			if tc.isWireFormatted {
 				if ok := isWireFormatted(tc.input); !ok {
 					t.Fatal("expect input be wire formatted")
 				}
@@ -71,7 +71,7 @@ func TestWireFormat(t *testing.T) {
 					t.Fatal("expect subjectID be not empty, got", subjectID)
 				}
 				if len(cipher) == 0 {
-					t.Fatal("expect unpacked cipher be not empty")
+					t.Fatal("expect cipher be not empty")
 				}
 
 				if want, got := tc.input, wireFormat(subjectID, cipher, version); got != want {
