@@ -606,34 +606,3 @@ func TestStruct_Scan(t *testing.T) {
 		})
 	}
 }
-
-// func TestStruct_Debug(t *testing.T) {
-
-// 	pf1 := Profile{
-// 		ID:    "abc 1",
-// 		Email: "email@example.com",
-// 	}
-// 	pf2 := Profile{
-// 		ID:    "abc 2",
-// 		Email: "email@example.com",
-// 	}
-
-// 	pfs := []any{pf1, pf2}
-
-// 	ps, err := scan(pfs, false)
-// 	if err != nil {
-// 		t.Fatal("expect err be nil, got", err)
-// 	}
-// 	t.Logf("--> %+v", pfs)
-
-// 	err = ps.replace(func(fr FieldReplace, val string) (string, error) {
-
-// 		return "hello", nil
-// 	})
-
-// 	if err != nil {
-// 		t.Fatal("expect err be nil, got", err)
-// 	}
-
-// 	t.Logf("--> %+v", pfs)
-// }

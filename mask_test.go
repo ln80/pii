@@ -37,6 +37,18 @@ func TestMask(t *testing.T) {
 		},
 		{
 			val: &Profile{
+				Email:    "invalid_email.com",
+				Fullname: "Guadalupe Kemmer DDS",
+				Device: Device{
+					IPAddr: "169.251.207.194",
+				},
+				CreditCards: []CreditCard{{Number: "invalid_number"}},
+			},
+			// Mask fails if the predefined mask is incompatible with the PII value
+			ok: false,
+		},
+		{
+			val: &Profile{
 				Email:    "email@example.com",
 				Fullname: "Guadalupe Kemmer DDS",
 				Device: Device{
@@ -60,7 +72,10 @@ func TestMask(t *testing.T) {
 		t.Run("tc: "+strconv.Itoa(i), func(t *testing.T) {
 			err := Mask(tc.val)
 			if !tc.ok {
-				if !errors.Is(err, tc.err) {
+				if err == nil {
+					t.Fatal("expect err not to be nil")
+				}
+				if tc.err != nil && !errors.Is(err, tc.err) {
 					t.Fatalf("expect err is %v, got %v", tc.err, err)
 				}
 				return
