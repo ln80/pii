@@ -390,7 +390,6 @@ func (e *Engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 
 	defer func() {
 		if err != nil {
-			// err = errors.Join( core.ErrPersistKeyFailure, err)
 			err = errors.Join(core.ErrPersistKeyFailure, err)
 		}
 	}()
