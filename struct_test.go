@@ -46,19 +46,19 @@ func TestStruct_Redact(t *testing.T) {
 		},
 		{
 			val:  &Address{Street: "07024 Quigley Trace"},
-			want: &Address{Street: "0****************ce"},
+			want: &Address{Street: "*******************"},
 			ok:   true,
 		},
 		{
 			val:  &Address{Street: "070 a"},
-			want: &Address{Street: "****a"},
+			want: &Address{Street: "*****"},
 			ok:   true,
 		},
 		func() tc {
 			testErr := errors.New("test replace error")
 			return tc{
 				val: &Address{Street: "070 a"},
-				fn: func(rf ReplaceField, val string) (string, error) {
+				fn: func(fr FieldReplace, val string) (string, error) {
 					return "", testErr
 				},
 				ok:  false,
@@ -68,7 +68,7 @@ func TestStruct_Redact(t *testing.T) {
 		{
 			val:  &Address{Street: "070 a"},
 			want: &Address{Street: "*"},
-			fn: func(rf ReplaceField, val string) (string, error) {
+			fn: func(fr FieldReplace, val string) (string, error) {
 				return "*", nil
 			},
 			ok: true,
@@ -81,8 +81,8 @@ func TestStruct_Redact(t *testing.T) {
 			},
 			want: &Profile{
 				ID:    "",
-				Email: "V**********************om",
-				Phone: ptr("2*********29"),
+				Email: "*************************",
+				Phone: ptr("************"),
 			},
 			ok: true,
 		},
@@ -102,9 +102,9 @@ func TestStruct_Redact(t *testing.T) {
 				want: &T{
 					Profile: Profile{
 						ID:    "abc",
-						Email: "e**************om",
+						Email: "*****************",
 					},
-					Address: &Address{Street: "0****************ce"},
+					Address: &Address{Street: "*******************"},
 				},
 				ok: true,
 			}
@@ -135,14 +135,14 @@ func TestStruct_Redact(t *testing.T) {
 				},
 				want: &T{
 					Email:    "****@****.com",
-					Fullname: "S***********te",
+					Fullname: "**************",
 				},
-				fn: func(rf ReplaceField, val string) (string, error) {
+				fn: func(fr FieldReplace, val string) (string, error) {
 					switch {
-					case rf.RType == reflect.TypeOf(Email("")):
+					case fr.RType == reflect.TypeOf(Email("")):
 						return "****@****.com", nil
 					default:
-						return defaultRedactFunc(rf, val)
+						return defaultRedactFunc(fr, val)
 					}
 				},
 				ok: true,
@@ -173,7 +173,7 @@ func TestStruct_Redact(t *testing.T) {
 	}
 }
 
-func TestStruct_Check(t *testing.T) {
+func TestStruct_Found(t *testing.T) {
 	type tc struct {
 		val any
 		ok  bool
@@ -205,7 +205,7 @@ func TestStruct_Check(t *testing.T) {
 	for i, tc := range tcs {
 		t.Run("tc: "+strconv.Itoa(i+1), func(t *testing.T) {
 
-			ok, err := Check(tc.val)
+			ok, err := Found(tc.val)
 
 			if got, want := err, tc.err; !errors.Is(got, want) {
 				t.Fatalf("expect %v, %v be equals", got, want)
@@ -220,11 +220,9 @@ func TestStruct_Check(t *testing.T) {
 
 func TestStruct_Scan(t *testing.T) {
 	// replaceFn does empty PII fields. This particular behavior makes testing easier.
-	replaceFn := func(rf ReplaceField, val string) (newVal string, err error) {
+	replaceFn := func(fr FieldReplace, val string) (newVal string, err error) {
 		return "", nil
 	}
-
-	// Helper structs:
 
 	type tc struct {
 		val  any
@@ -608,34 +606,3 @@ func TestStruct_Scan(t *testing.T) {
 		})
 	}
 }
-
-// func TestStruct_Debug(t *testing.T) {
-
-// 	pf1 := Profile{
-// 		ID:    "abc 1",
-// 		Email: "email@example.com",
-// 	}
-// 	pf2 := Profile{
-// 		ID:    "abc 2",
-// 		Email: "email@example.com",
-// 	}
-
-// 	pfs := []any{pf1, pf2}
-
-// 	ps, err := scan(pfs, false)
-// 	if err != nil {
-// 		t.Fatal("expect err be nil, got", err)
-// 	}
-// 	t.Logf("--> %+v", pfs)
-
-// 	err = ps.replace(func(rf ReplaceField, val string) (string, error) {
-
-// 		return "hello", nil
-// 	})
-
-// 	if err != nil {
-// 		t.Fatal("expect err be nil, got", err)
-// 	}
-
-// 	t.Logf("--> %+v", pfs)
-// }

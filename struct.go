@@ -24,10 +24,9 @@ var (
 	ErrRedactFuncNotFound      = errors.New("redact function not found")
 )
 
-// Check if a struct value contains PII.
-//
-// It fails if "pii" tag is misconfigured or value is not a struct or pointer to struct.
-func Check(v any) (bool, error) {
+// Found returns wether or not the struct contains PII data fields.
+// It returns an error if `pii` tag is misconfigured or value param isn't a struct or struct pointer.
+func Found(v any) (bool, error) {
 	t := reflect.TypeOf(v)
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -44,13 +43,15 @@ func Check(v any) (bool, error) {
 	return piiStructType.hasPII, nil
 }
 
+// RedactConfig presents the config required by `pii.Redact`.
 type RedactConfig struct {
 	RedactFunc ReplaceFunc
 }
 
-// Redact does redact PII data from the struct field values.
+// Redact does redact PII data from the struct field values
+// by replacing each character with '*'.
 //
-// It fails if 'structPtr' is not a struct pointer, the pii tag is misconfigured,
+// It fails if the value isn't a struct pointer, `pii` tag is misconfigured,
 // or the redact function is nil.
 //
 // Optionally, it accepts overriding the default redact function.
@@ -80,26 +81,8 @@ func Redact(structPtr any, opts ...func(*RedactConfig)) error {
 	return piiStruct.replace(cfg.RedactFunc)
 }
 
-var defaultRedactFunc ReplaceFunc = func(_ ReplaceField, val string) (string, error) {
-	runes := []rune(val)
-	switch l := len(val); {
-	case l == 0:
-		return val, nil
-	case l > 6:
-		for i := 1; i < l-2; i++ {
-			runes[i] = '*'
-		}
-
-	case l > 3:
-		for i := 0; i < l-1; i++ {
-			runes[i] = '*'
-		}
-	default:
-		for i := 0; i < l; i++ {
-			runes[i] = '*'
-		}
-	}
-	return string(runes), nil
+var defaultRedactFunc ReplaceFunc = func(_ FieldReplace, val string) (string, error) {
+	return strings.Repeat("*", len(val)), nil
 }
 
 var (
@@ -123,6 +106,7 @@ type piiField struct {
 	isSlice, isMap          bool
 	nestedStructType        *piiStructType
 	nestedStructTypeRef     reflect.Type
+	kind                    string
 }
 
 func (f piiField) getType(cache map[reflect.Type]*piiStructType) *piiStructType {
@@ -236,14 +220,15 @@ func (ps *piiStruct) getSubjectID() string {
 	return s
 }
 
-type ReplaceField struct {
+type FieldReplace struct {
 	SubjectID   string
 	Name        string
 	RType       reflect.Type
 	Replacement string
+	Kind        string
 }
 
-type ReplaceFunc func(rf ReplaceField, val string) (string, error)
+type ReplaceFunc func(fr FieldReplace, val string) (string, error)
 
 func (s *piiStruct) replace(fn ReplaceFunc) error {
 	var (
@@ -265,10 +250,11 @@ func (s *piiStruct) replace(fn ReplaceFunc) error {
 		if piiF.isData {
 			val := elem.String()
 
-			newVal, err = fn(ReplaceField{
+			newVal, err = fn(FieldReplace{
 				SubjectID:   s.subjectID,
 				RType:       piiF.sf.Type,
 				Replacement: piiF.replacement,
+				Kind:        piiF.kind,
 			}, val)
 			if err != nil {
 				return err
@@ -408,6 +394,7 @@ func scanStructTypeWithContext(c piiStructContext, rt reflect.Type) (piiStructTy
 			isNested:    name == tagDive,
 			prefix:      opts["prefix"],
 			replacement: opts["replace"],
+			kind:        opts["kind"],
 		}
 
 		switch {

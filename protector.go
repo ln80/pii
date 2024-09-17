@@ -59,9 +59,9 @@ type Protector interface {
 // ProtectorConfig presents the configuration of Protector service
 type ProtectorConfig struct {
 
-	// Engine presents an implementation of core.KeyEngine.
+	// KeyEngine presents an implementation of core.KeyEngine.
 	// It manages encryption materials' life-cycle.
-	Engine core.KeyEngine
+	KeyEngine core.KeyEngine
 
 	// Encrypter presents an implementation of core.Encrypter.
 	// It allows using a specific encryption algorithm.
@@ -105,7 +105,7 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 		namespace: namespace,
 		ProtectorConfig: &ProtectorConfig{
 			Encrypter:    aes.New256GCMEncrypter(),
-			Engine:       engine,
+			KeyEngine:    engine,
 			CacheEnabled: true,
 			GracefulMode: true,
 		},
@@ -118,13 +118,18 @@ func NewProtector(namespace string, engine core.KeyEngine, opts ...func(*Protect
 		opt(p.ProtectorConfig)
 	}
 
-	if p.Engine == nil {
+	if p.KeyEngine == nil {
 		panic("invalid Key Engine service, nil value found")
 	}
 
 	if p.CacheEnabled {
-		if _, ok := p.Engine.(core.KeyEngineCache); !ok {
-			p.Engine = memory.NewCacheWrapper(p.Engine, p.CacheTTL)
+		if _, ok := p.KeyEngine.(core.KeyEngineCache); !ok {
+			p.KeyEngine = memory.NewCacheWrapper(p.KeyEngine, p.CacheTTL)
+		}
+		if p.TokenEngine != nil {
+			if _, ok := p.TokenEngine.(core.TokenEngineCache); !ok {
+				p.TokenEngine = memory.NewTokenCacheWrapper(p.TokenEngine, p.CacheTTL)
+			}
 		}
 	}
 
@@ -160,15 +165,15 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...any) (err error) 
 	slices.Sort(subjectIDs)
 	subjectIDs = slices.Compact(subjectIDs)
 
-	keys, err := p.Engine.GetOrCreateKeys(ctx, p.namespace, subjectIDs, p.Encrypter.KeyGen())
+	keys, err := p.KeyEngine.GetOrCreateKeys(ctx, p.namespace, subjectIDs, p.Encrypter.KeyGen())
 	if err != nil {
 		return err
 	}
 
-	fn := func(rf ReplaceField, val string) (newVal string, err error) {
-		key, ok := keys[rf.SubjectID]
+	fn := func(fr FieldReplace, val string) (newVal string, err error) {
+		key, ok := keys[fr.SubjectID]
 		if !ok {
-			err = ErrSubjectForgotten.withSubject(rf.SubjectID)
+			err = ErrSubjectForgotten.withSubject(fr.SubjectID)
 			return
 		}
 		// idempotency: no need to re-encrypt field value if it's wire formatted.
@@ -182,7 +187,7 @@ func (p *protector) Encrypt(ctx context.Context, structPtrs ...any) (err error) 
 		if err != nil {
 			return
 		}
-		newVal = wireFormat(rf.SubjectID, encodedVal)
+		newVal = wireFormat(fr.SubjectID, encodedVal)
 		return
 	}
 
@@ -217,7 +222,7 @@ func (p *protector) Decrypt(ctx context.Context, structPtrs ...any) (err error) 
 	}
 
 	subjectIDs := make([]string, 0)
-	fn := func(rf ReplaceField, val string) (newVal string, err error) {
+	fn := func(fr FieldReplace, val string) (newVal string, err error) {
 		newVal = val
 		_, subjectID, _, err := parseWireFormat(val)
 		if err != nil {
@@ -235,12 +240,12 @@ func (p *protector) Decrypt(ctx context.Context, structPtrs ...any) (err error) 
 	}
 	slices.Sort(subjectIDs)
 	subjectIDs = slices.Compact(subjectIDs)
-	keys, err := p.Engine.GetKeys(ctx, p.namespace, subjectIDs)
+	keys, err := p.KeyEngine.GetKeys(ctx, p.namespace, subjectIDs)
 	if err != nil {
 		return
 	}
 
-	fn = func(rf ReplaceField, val string) (newVal string, err error) {
+	fn = func(fr FieldReplace, val string) (newVal string, err error) {
 		v, subjectID, cipherText, err := parseWireFormat(val)
 		if err != nil {
 			// TBD warning ??
@@ -255,7 +260,7 @@ func (p *protector) Decrypt(ctx context.Context, structPtrs ...any) (err error) 
 
 		key, ok := keys[subjectID]
 		if !ok {
-			newVal = rf.Replacement
+			newVal = fr.Replacement
 			return
 		}
 
@@ -289,11 +294,11 @@ func (p *protector) Forget(ctx context.Context, subID string) (err error) {
 	}()
 
 	if p.GracefulMode {
-		err = p.Engine.DisableKey(ctx, p.namespace, subID)
+		err = p.KeyEngine.DisableKey(ctx, p.namespace, subID)
 		return
 	}
 
-	err = p.Engine.DeleteKey(ctx, p.namespace, subID)
+	err = p.KeyEngine.DeleteKey(ctx, p.namespace, subID)
 	return
 }
 
@@ -317,7 +322,7 @@ func (p *protector) Recover(ctx context.Context, subID string) (err error) {
 		}
 	}()
 
-	err = p.Engine.RenableKey(ctx, p.namespace, subID)
+	err = p.KeyEngine.RenableKey(ctx, p.namespace, subID)
 	return
 }
 
@@ -332,7 +337,12 @@ func (p *protector) Clear(ctx context.Context, force bool) (err error) {
 		}
 	}()
 
-	if cp, ok := p.Engine.(core.KeyEngineCache); ok {
+	if cp, ok := p.KeyEngine.(core.KeyEngineCache); ok {
+		err = cp.ClearCache(ctx, p.namespace, force)
+		return
+	}
+
+	if cp, ok := p.TokenEngine.(core.TokenEngineCache); ok {
 		err = cp.ClearCache(ctx, p.namespace, force)
 		return
 	}
