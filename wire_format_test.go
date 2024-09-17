@@ -7,7 +7,6 @@ import (
 )
 
 func TestWireFormat(t *testing.T) {
-
 	base64 := func(str string) string {
 		return base64.StdEncoding.EncodeToString([]byte(str))
 	}
