@@ -9,12 +9,12 @@ import (
 
 // Errors returned by KeyEngine implementations
 var (
-	ErrPersistKeyFailure = errors.New("failed to persist encryption key(s)")
-	ErrGetKeyFailure     = errors.New("failed to get encryption key(s)")
-	ErrRenableKeyFailure = errors.New("failed to renable encryption key(s)")
-	ErrDisableKeyFailure = errors.New("failed to disable encryption key")
-	ErrDeleteKeyFailure  = errors.New("failed to delete encryption key")
-	ErrKeyNotFound       = errors.New("encryption key not found")
+	ErrPersistKeyFailure  = errors.New("failed to persist encryption key(s)")
+	ErrGetKeyFailure      = errors.New("failed to get encryption key(s)")
+	ErrReEnableKeyFailure = errors.New("failed to renable encryption key(s)")
+	ErrDisableKeyFailure  = errors.New("failed to disable encryption key")
+	ErrDeleteKeyFailure   = errors.New("failed to delete encryption key")
+	ErrKeyNotFound        = errors.New("encryption key not found")
 )
 
 // Encryption key lifecycle states.
@@ -109,9 +109,9 @@ type KeyEngine interface {
 	// It returns ErrKeyNotFound error if the key is already deleted.
 	DisableKey(ctx context.Context, namespace, keyID string) error
 
-	// RenableKey renables the associated key of the given keyID.
+	// ReEnableKey reenables the associated key of the given keyID.
 	// It returns ErrKeyNotFound error if the key is already deleted.
-	RenableKey(ctx context.Context, namespace, keyID string) error
+	ReEnableKey(ctx context.Context, namespace, keyID string) error
 
 	// DeleteKey deletes the associated key of the given keyID.
 	DeleteKey(ctx context.Context, namespace, keyID string) error

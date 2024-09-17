@@ -14,7 +14,7 @@ type EngineMock struct {
 	ListNamespaceErr error
 	GetKeyErr        error
 	CreateKeyErr     error
-	RenableKeyErr    error
+	ReEnableKeyErr   error
 	DeleteKeyErr     error
 	DisableKeyErr    error
 
@@ -83,12 +83,12 @@ func (e *EngineMock) GetOrCreateKeys(ctx context.Context, namespace string, keyI
 	return e.KeyList, nil
 }
 
-// RenableKey implements dynamodb.KeyEngine
-func (e *EngineMock) RenableKey(ctx context.Context, namespace string, keyID string) error {
+// ReEnableKey implements dynamodb.KeyEngine
+func (e *EngineMock) ReEnableKey(ctx context.Context, namespace string, keyID string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if err := e.RenableKeyErr; err != nil {
+	if err := e.ReEnableKeyErr; err != nil {
 		return err
 	}
 	return nil

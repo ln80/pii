@@ -36,6 +36,8 @@ func TestKeyEngine(t *testing.T) {
 			gracePeriod := 3 * time.Millisecond
 			nspace := "tnt-54R"
 
+			ctx, cc := capacityContext(ctx)
+
 			eng := NewEngine(dbsvc.(ClientAPI), table, func(ec *EngineConfig) {
 				ec.GracePeriod = gracePeriod
 			}, nil)
@@ -57,6 +59,8 @@ func TestKeyEngine(t *testing.T) {
 			if want, got := nspace, ns[0]; want != got {
 				t.Fatalf("expect %v and %v are equals", want, got)
 			}
+
+			t.Logf("consumed capacity %+v", cc)
 		})
 
 	})

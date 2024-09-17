@@ -39,7 +39,9 @@ type KeyItem struct {
 var _ core.KeyEngine = &Engine{}
 
 func (e *Engine) updateKeyItem(ctx context.Context, namespace, keyID string, expr expression.Expression) error {
-	if _, err := e.svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+	ctx, cc := capacityContext(ctx)
+
+	out, err := e.svc.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		Key: map[string]types.AttributeValue{
 			hashKey:  &types.AttributeValueMemberS{Value: namespace},
 			rangeKey: &types.AttributeValueMemberS{Value: "key#" + keyID},
@@ -49,7 +51,12 @@ func (e *Engine) updateKeyItem(ctx context.Context, namespace, keyID string, exp
 		ExpressionAttributeNames:  expr.Names(),
 		ExpressionAttributeValues: expr.Values(),
 		UpdateExpression:          expr.Update(),
-	}); err != nil {
+		ReturnConsumedCapacity:    types.ReturnConsumedCapacityIndexes,
+	})
+	if out != nil {
+		addConsumedCapacity(cc, out.ConsumedCapacity)
+	}
+	if err != nil {
 		return err
 	}
 	return nil
@@ -58,6 +65,8 @@ func (e *Engine) updateKeyItem(ctx context.Context, namespace, keyID string, exp
 func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKey) (disabledOrDeleted map[string]struct{}, freshNew map[string]string, err error) {
 	disabledOrDeleted = map[string]struct{}{}
 	freshNew = map[string]string{}
+
+	ctx, cc := capacityContext(ctx)
 
 	handleExist := func(idkey core.IDKey) error {
 		// fake update; active key always has a value
@@ -86,7 +95,11 @@ func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			ExpressionAttributeValues: expr.Values(),
 			UpdateExpression:          expr.Update(),
 			ReturnValues:              types.ReturnValueUpdatedNew,
+			ReturnConsumedCapacity:    types.ReturnConsumedCapacityIndexes,
 		})
+		if out != nil {
+			addConsumedCapacity(cc, out.ConsumedCapacity)
+		}
 		if err != nil {
 			if isConditionCheckFailure(err) {
 				disabledOrDeleted[idkey.ID()] = struct{}{}
@@ -134,13 +147,18 @@ func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 			return nil, nil, err
 		}
 
-		if _, err = e.svc.PutItem(ctx, &dynamodb.PutItemInput{
+		out, err := e.svc.PutItem(ctx, &dynamodb.PutItemInput{
 			TableName:                 aws.String(e.table),
 			Item:                      mk,
 			ConditionExpression:       expr.Condition(),
 			ExpressionAttributeNames:  expr.Names(),
 			ExpressionAttributeValues: expr.Values(),
-		}); err != nil {
+			ReturnConsumedCapacity:    types.ReturnConsumedCapacityIndexes,
+		})
+		if out != nil {
+			addConsumedCapacity(cc, out.ConsumedCapacity)
+		}
+		if err != nil {
 			if isConditionCheckFailure(err) {
 				if err := handleExist(idkey); err != nil {
 					return nil, nil, err
@@ -158,9 +176,11 @@ func (e *Engine) createKeys(ctx context.Context, nspace string, keys []core.IDKe
 func (e *Engine) DeleteKey(ctx context.Context, namespace string, keyID string) (err error) {
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %v", core.ErrDeleteKeyFailure, err)
+			err = errors.Join(core.ErrDeleteKeyFailure, err)
 		}
 	}()
+
+	ctx, _ = capacityContext(ctx)
 
 	now := time.Now()
 	expr, err := expression.
@@ -194,10 +214,12 @@ func (e *Engine) DisableKey(ctx context.Context, namespace string, keyID string)
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, core.ErrKeyNotFound) {
-				err = fmt.Errorf("%w: %v", core.ErrDisableKeyFailure, err)
+				err = errors.Join(core.ErrDisableKeyFailure, err)
 			}
 		}
 	}()
+
+	ctx, _ = capacityContext(ctx)
 
 	now := time.Now()
 	expr, err := expression.
@@ -229,15 +251,17 @@ func (e *Engine) DisableKey(ctx context.Context, namespace string, keyID string)
 	return nil
 }
 
-// RenableKey implements core.KeyEngine
-func (e *Engine) RenableKey(ctx context.Context, namespace string, keyID string) (err error) {
+// ReEnableKey implements core.KeyEngine
+func (e *Engine) ReEnableKey(ctx context.Context, namespace string, keyID string) (err error) {
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, core.ErrKeyNotFound) {
-				err = fmt.Errorf("%w: %v", core.ErrRenableKeyFailure, err)
+				err = errors.Join(core.ErrReEnableKeyFailure, err)
 			}
 		}
 	}()
+
+	ctx, _ = capacityContext(ctx)
 
 	expr, err := expression.
 		NewBuilder().
@@ -277,7 +301,7 @@ func (e *Engine) GetKeys(ctx context.Context, namespace string, keyIDs []string)
 
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %v", core.ErrGetKeyFailure, err)
+			err = errors.Join(core.ErrGetKeyFailure, err)
 		}
 	}()
 
@@ -320,11 +344,17 @@ func (e *Engine) GetKeys(ctx context.Context, namespace string, keyIDs []string)
 		ConsistentRead:            aws.Bool(true),
 		ProjectionExpression:      expr.Projection(),
 		IndexName:                 aws.String(lsi),
+		ReturnConsumedCapacity:    types.ReturnConsumedCapacityIndexes,
 	})
+
+	ctx, cc := capacityContext(ctx)
 
 	items := []KeyItem{}
 	for p.HasMorePages() {
 		out, err := p.NextPage(ctx)
+		if out != nil {
+			addConsumedCapacity(cc, out.ConsumedCapacity)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -351,6 +381,8 @@ func (e *Engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 		keyGen = aes.Key256GenFn
 	}
 
+	ctx, _ = capacityContext(ctx)
+
 	keys, err = e.GetKeys(ctx, namespace, keyIDs)
 	if err != nil {
 		return nil, err
@@ -358,7 +390,7 @@ func (e *Engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 
 	defer func() {
 		if err != nil {
-			// err = fmt.Errorf("%w: %v", core.ErrPersistKeyFailure, err)
+			// err = errors.Join( core.ErrPersistKeyFailure, err)
 			err = errors.Join(core.ErrPersistKeyFailure, err)
 		}
 	}()
@@ -420,7 +452,7 @@ func (e *Engine) DeleteUnusedKeys(ctx context.Context, namespace string) (err er
 			expression.NamesList(expression.Name(attrKeyID)),
 		).Build()
 	if err != nil {
-		err = fmt.Errorf("%w: %v", core.ErrDeleteKeyFailure, err)
+		err = errors.Join(core.ErrDeleteKeyFailure, err)
 		return
 	}
 
@@ -433,12 +465,18 @@ func (e *Engine) DeleteUnusedKeys(ctx context.Context, namespace string) (err er
 		ConsistentRead:            aws.Bool(true),
 		ProjectionExpression:      expr.Projection(),
 		IndexName:                 aws.String(lsi),
+		ReturnConsumedCapacity:    types.ReturnConsumedCapacityIndexes,
 	})
+
+	ctx, cc := capacityContext(ctx)
 
 	items := []map[string]string{}
 	for p.HasMorePages() {
 		var out *dynamodb.QueryOutput
 		out, err = p.NextPage(ctx)
+		if out != nil {
+			addConsumedCapacity(cc, out.ConsumedCapacity)
+		}
 		if err != nil {
 			return
 		}

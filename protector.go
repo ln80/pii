@@ -322,7 +322,7 @@ func (p *protector) Recover(ctx context.Context, subID string) (err error) {
 		}
 	}()
 
-	err = p.KeyEngine.RenableKey(ctx, p.namespace, subID)
+	err = p.KeyEngine.ReEnableKey(ctx, p.namespace, subID)
 	return
 }
 

@@ -40,6 +40,7 @@ func TokenEngineTestSuite(t *testing.T, ctx context.Context, eng core.TokenEngin
 		t.Fatalf("expect result map length be %d, got %d", want, got)
 	}
 
+	// assert idempotency
 	result_2, err := eng.Tokenize(ctx, nspace, values)
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
@@ -48,35 +49,29 @@ func TokenEngineTestSuite(t *testing.T, ctx context.Context, eng core.TokenEngin
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 
-	tokens := []string{}
-	for _, r := range result {
-		tokens = append(tokens, r.Token)
-	}
-	result_3, err := eng.Detokenize(ctx, nspace, tokens)
+	result_3, err := eng.Detokenize(ctx, nspace, result.Tokens())
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
-	values_3 := []core.TokenData{}
-	for _, r := range result_3 {
-		values_3 = append(values_3, r.Value)
-	}
+	values_3 := result_3.Values()
 
+	// assert detokenized values are the same as original
 	slices.Sort(values)
 	slices.Sort(values_3)
 	if want, got := values, values_3; !reflect.DeepEqual(want, got) {
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 
-	var tokenValue core.TokenRecord
+	var tokenToDelete core.TokenRecord
 	for _, value := range result {
-		tokenValue = value
+		tokenToDelete = value
 		break
 	}
-
-	if err := eng.DeleteToken(ctx, nspace, tokenValue.Token); err != nil {
+	if err := eng.DeleteToken(ctx, nspace, tokenToDelete.Token); err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
 	}
 
+	// assert tokenize a deleted token returns a new fresh one.
 	result_4, err := eng.Tokenize(ctx, nspace, values)
 	if err != nil {
 		t.Fatalf("expect err be nil, got: %v", err)
