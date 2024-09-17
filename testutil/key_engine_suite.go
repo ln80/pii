@@ -95,11 +95,11 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine, o
 	}
 
 	// Test renable key
-	if want, err := nilErr, eng.RenableKey(ctx, nspace, keyIDs[0]); !errors.Is(err, want) {
+	if want, err := nilErr, eng.ReEnableKey(ctx, nspace, keyIDs[0]); !errors.Is(err, want) {
 		t.Fatalf("expect err be %v, got: %v", want, err)
 	}
 	// assert renable key idempotency
-	if want, err := nilErr, eng.RenableKey(ctx, nspace, keyIDs[0]); !errors.Is(err, want) {
+	if want, err := nilErr, eng.ReEnableKey(ctx, nspace, keyIDs[0]); !errors.Is(err, want) {
 		t.Fatalf("expect err be %v, got: %v", want, err)
 	}
 
@@ -132,7 +132,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine, o
 		t.Fatalf("expect %v, %v be equals", want, got)
 	}
 	// Test renable key after a hard delete
-	if want, err := core.ErrKeyNotFound, eng.RenableKey(ctx, nspace, keyIDs[0]); !errors.Is(err, want) {
+	if want, err := core.ErrKeyNotFound, eng.ReEnableKey(ctx, nspace, keyIDs[0]); !errors.Is(err, want) {
 		t.Fatalf("expect err be %v, got: %v", want, err)
 	}
 	// Test disable key after a hard delete
@@ -163,7 +163,7 @@ func KeyEngineTestSuite(t *testing.T, ctx context.Context, eng core.KeyEngine, o
 		}
 
 		// Assert picked key can't be recovered and no longer exist
-		if want, err := core.ErrKeyNotFound, eng.RenableKey(ctx, nspace, keyIDs[1]); !errors.Is(err, want) {
+		if want, err := core.ErrKeyNotFound, eng.ReEnableKey(ctx, nspace, keyIDs[1]); !errors.Is(err, want) {
 			t.Fatalf("expect err be %v, got: %v", want, err)
 		}
 	}

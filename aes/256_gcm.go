@@ -5,7 +5,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
-	"fmt"
+	"errors"
 	"io"
 
 	"github.com/ln80/pii/core"
@@ -41,7 +41,7 @@ func prepareAdditionalData(namespace string) []byte {
 func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (cipherTxt []byte, err error) {
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %v", core.ErrEncryptionFailure, err)
+			err = errors.Join(core.ErrEncryptionFailure, err)
 		}
 	}()
 
@@ -74,7 +74,7 @@ func (e *aes256gcm) Encrypt(namespace string, key core.Key, plainTxt string) (ci
 func (e *aes256gcm) Decrypt(namespace string, key core.Key, cipherTxt []byte) (plainTxt string, err error) {
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %v", core.ErrDecryptionFailure, err)
+			err = errors.Join(core.ErrDecryptionFailure, err)
 		}
 	}()
 

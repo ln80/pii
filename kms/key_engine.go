@@ -2,6 +2,7 @@ package kms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -77,7 +78,7 @@ func (e *engine) GetKeys(ctx context.Context, namespace string, keyIDs []string)
 
 	defer func() {
 		if err != nil {
-			err = fmt.Errorf("%w: %v", core.ErrGetKeyFailure, err)
+			err = errors.Join(core.ErrGetKeyFailure, err)
 		}
 	}()
 
@@ -173,9 +174,9 @@ func (e *engine) DisableKey(ctx context.Context, namespace, keyID string) error 
 	return e.origin.DisableKey(ctx, namespace, keyID)
 }
 
-// RenableKey implements core.KeyEngineWrapper
-func (e *engine) RenableKey(ctx context.Context, namespace, keyID string) error {
-	return e.origin.RenableKey(ctx, namespace, keyID)
+// ReEnableKey implements core.KeyEngineWrapper
+func (e *engine) ReEnableKey(ctx context.Context, namespace, keyID string) error {
+	return e.origin.ReEnableKey(ctx, namespace, keyID)
 }
 
 // DeleteKey implements core.KeyEngineWrapper

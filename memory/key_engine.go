@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -163,7 +164,7 @@ func (e *engine) GetOrCreateKeys(ctx context.Context, namespace string, keyIDs [
 
 			newKey, err := keyGen(ctx, namespace, keyID)
 			if err != nil {
-				return nil, fmt.Errorf("%w: %v", core.ErrPersistKeyFailure, err)
+				return nil, errors.Join(core.ErrPersistKeyFailure, err)
 			}
 			keys[keyID] = core.Key(newKey)
 
@@ -204,10 +205,10 @@ func (e *engine) DisableKey(ctx context.Context, namespace, keyID string) error 
 	return nil
 }
 
-// RenableKey implements core.KeyEngine
-func (e *engine) RenableKey(ctx context.Context, namespace, keyID string) error {
+// ReEnableKey implements core.KeyEngine
+func (e *engine) ReEnableKey(ctx context.Context, namespace, keyID string) error {
 	if e.origin != nil {
-		if err := e.origin.RenableKey(ctx, namespace, keyID); err != nil {
+		if err := e.origin.ReEnableKey(ctx, namespace, keyID); err != nil {
 			return err
 		}
 	}
